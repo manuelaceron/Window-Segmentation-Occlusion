@@ -1,0 +1,38 @@
+batch_size: 5 #5  # If LastDrop is False, check this value for DeepLab, Graz (4) and set True, ECP(6), ArtDeco (5)
+img_size: 512  # 
+overlap: 64
+epoches: 100
+base_lr: 0.007 #0.007 #0.0001
+weight_decay: 0.00002 #0.00002 # #
+momentum: 0.9
+power: 0.99
+gpu_id: '1'
+save_iter: 10
+num_workers: 0 #check how this works
+val_visual: True
+image_driver: 'gdal'   #pillow, gdal
+color_table: 0,0,0,255,255,255,0,255,0,0,0,255
+loss_type: 'bce'
+num_class: 1  # some parameters
+thread: 0.5
+
+resume_ckpt: False #'/home/cero_ma/MCV/code220419_windows/0401_files/UNet_test_10e/pth_UNet/valiou_best.pth'
+model_name: 'ALKU_Net'#'' #'TransUNet' #''#'DeepLabV3Plus' #'' #'Res_UNet_50' # #'UNet'  #AttU_Net
+pretrained_model: None#'valiou_best.pth'
+extra_loss: False
+model_experision: '400e_ecp-ref-occ60_LI_GT_k10r1'
+
+input_bands: 3
+vis_graph: False
+
+#data path
+root_path: '/home/cero_ma/MCV/code220419_windows'
+data_name: 'data'
+exp_name: '0401'
+
+pred_path: 'test_result'
+model_dir: 'model_result'
+#save_dir_model: 'save_dir_model'
+amodal: True #input: image + modal mask
+prob: False  
+pred_prob_path: 'prob_test_result'
