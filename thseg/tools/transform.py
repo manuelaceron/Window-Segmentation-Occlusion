@@ -249,13 +249,13 @@ class RandomVerticalFlip(object):
         return 'RandomVerticalFlip'
 
 
-class GaussianBlur(object):
+class GaussianBlur2(object):
     def __call__(self, sample):
         sample['image'] = cv2.GaussianBlur(sample['image'], (5, 5), 0)
         return sample
 
     def __str__(self):
-        return 'GaussianBlur'
+        return 'GaussianBlur2'
 
 
 class morphologyEx(object):
@@ -360,3 +360,90 @@ class ToTensor(object):
 
     def __str__(self):
         return 'ToTensor'
+
+
+class GaussianBlur(object):
+    """GaussianBlur."""
+
+    def __call__(self, sample):
+        #blurrer = T.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5))
+        
+        sample['image'] = cv2.GaussianBlur(sample['image'].astype(np.uint8), (5, 5), 0)
+        return sample
+
+    def __str__(self):
+        return 'GaussianBlur'
+
+class RandomPerspective(object):
+    """RandomPerspective."""
+
+    def __call__(self, sample):
+        perspective_transformer = T.RandomPerspective(distortion_scale=0.6, p=1.0)
+        
+
+        for elem in sample.keys():
+            tmp = torch.tensor(sample[elem])
+            
+            if len(tmp.shape) < 3:
+                
+                tmp = torch.unsqueeze(tmp,0)
+                tmp = torch.cat([tmp] * 3, dim=0)
+                tmp = perspective_transformer(tmp)
+                tmp = tmp[:1,:,:][0] 
+            else:
+                tmp = perspective_transformer(tmp)
+
+            sample[elem] = tmp.numpy()
+        return sample
+
+    def __str__(self):
+        return 'RandomPerspective'
+
+class RandomCrop(object):
+    """RandomCrop."""
+
+    def __call__(self, sample):
+        #cropper = T.RandomCrop(size=(128, 128))
+ 
+        for elem in sample.keys():
+            tmp = sample[elem]
+            
+            #if len(tmp.shape) > 2:
+            #    tmp = torch.permute(tmp, (2,0,1) )
+            #    tmp = cropper(tmp)
+            #    tmp = torch.permute(tmp, (1,2,0) )
+            #else: 
+            #    tmp = cropper(tmp)
+            #sample[elem] = tmp.numpy()  
+            #pdb.set_trace()
+
+            crop_height = 128
+            crop_width = 128
+
+            # Get the image and mask dimensions
+            image_height, image_width = tmp.shape[:2]
+
+            # Calculate the maximum top-left position for the crop
+            max_top = image_height - crop_height
+            max_left = image_width - crop_width
+
+            # Generate random top-left coordinates for the crop
+            top = np.random.randint(0, max_top + 1)
+            left = np.random.randint(0, max_left + 1)
+
+            # Calculate the bottom-right coordinates of the crop
+            bottom = top + crop_height
+            right = left + crop_width
+
+            # Perform the random crop on the RGB image
+            if len(tmp.shape) > 2:
+                cropped_image = tmp[top:bottom, left:right, :]
+            else:
+                # Perform the same random crop on the binary mask
+                cropped_mask = tmp[top:bottom, left:right]
+            
+            sample[elem] = tmp
+        return sample
+
+    def __str__(self):
+        return 'RandomCrop'

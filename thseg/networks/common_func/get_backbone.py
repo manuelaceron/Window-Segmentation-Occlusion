@@ -1,7 +1,8 @@
-import timm
+import timm, pdb
 import torch
 
 def get_model(model_name, in_c=3, pretrained=False, checkpoint_path='None'):
+    
     if pretrained:
         print('loading pretrained model {}, from the default path'.format(checkpoint_path))
         model = timm.create_model(model_name, pretrained=pretrained, features_only=True, in_chans=in_c)
@@ -16,6 +17,6 @@ def get_model(model_name, in_c=3, pretrained=False, checkpoint_path='None'):
         return model
     else:
         print('no pretrained model')
-        model = timm.create_model(model_name, pretrained=False, features_only=True, in_chans=in_c) #TODO: Originally pretrained = False
-        print('using: ', model_name, ' pretrained: ', False )
+        model = timm.create_model(model_name, pretrained=True, features_only=True, in_chans=in_c) #TODO: Originally pretrained = False
+        print('using: ', model_name, ' pretrained: ', True )
         return model

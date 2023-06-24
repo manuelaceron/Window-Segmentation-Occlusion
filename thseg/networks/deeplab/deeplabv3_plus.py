@@ -53,16 +53,16 @@ class _AsppPooling(nn.Module):
 
 
 class _ASPP(nn.Module):
-    def __init__(self, in_cannels, atrous_rates, norm_layer):
+    def __init__(self, in_cannels, atrous_rates, norm_layer, num_classannels = 256):
         super(_ASPP, self).__init__()
-        num_classannels = 256
+        
         self.b0 = nn.Sequential(
             nn.Conv2d(in_cannels, num_classannels, 1, bias=False), #first conv kernel 1, no dilated conv
             norm_layer(num_classannels),
             nn.ReLU(True)
         )
 
-        rate1, rate2, rate3 = tuple(atrous_rates)
+        rate1, rate2, rate3 = tuple(atrous_rates) 
         self.b1 = _ASPPConv(in_cannels, num_classannels, rate1, norm_layer)
         self.b2 = _ASPPConv(in_cannels, num_classannels, rate2, norm_layer)
         self.b3 = _ASPPConv(in_cannels, num_classannels, rate3, norm_layer)
@@ -134,6 +134,7 @@ class DeepLabV3Plus(nn.Module):
     def forward(self, x):
         size = x.size()[2:]
         c1, c4 = self.base_forward(x) #c1 are low level features, and c4 is feature extractor output
+       
         x = self.head(c4, c1) #torch.Size([2, 1, 128, 128]) c1 and x concat 
 
         x = F.interpolate(x, size, mode='bilinear', align_corners=True) # Upsampled by 4
@@ -160,8 +161,9 @@ class _DeepLabHead(nn.Module):
         size = c1.size()[2:]
         c1 = self.c1_block(c1) #_ConvBNReLU
         x = self.aspp(x)
+        
         x = F.interpolate(x, size, mode='bilinear', align_corners=True)
-        #pdb.set_trace()
+        
         return self.block(torch.cat([x, c1], dim=1)) #this is concat in decoder
 
 if __name__ == '__main__':

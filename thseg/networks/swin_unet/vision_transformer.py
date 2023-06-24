@@ -32,9 +32,9 @@ class SwinUnet(nn.Module):
                                             in_chans=in_c,
                                             num_classes=self.num_classes,
                                             embed_dim=96,
-                                            depths=[2, 2, 2, 2],
+                                            depths=[2, 2, 6, 2],
                                             num_heads=[3, 6, 12, 24],
-                                            window_size=16,
+                                            window_size=8,
                                             mlp_ratio=4.,
                                             qkv_bias=True,
                                             # qk_scale=config.MODEL.SWIN.QK_SCALE,
@@ -42,18 +42,18 @@ class SwinUnet(nn.Module):
                                             drop_path_rate=0.1,
                                             ape=False,
                                             patch_norm=True,
-                                            use_checkpoint=False)
+                                            use_checkpoint=False) #depths=[2, 2, 2, 2], window_size=16
         self.activate = nn.Softmax() if num_class > 1 else nn.Sigmoid()
 
     def forward(self, x):
         if x.size()[1] == 1:
             x = x.repeat(1, 3, 1, 1)
         logits = self.swin_unet(x)
-        logits = self.activate(logits)
+        #logits = self.activate(logits)
         return logits
 
     def load_from(self, pretrained_path):
-        if pretrained_path is not None:
+        if 1 ==2: #pretrained_path is not None:
             print("pretrained_path:{}".format(pretrained_path))
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             pretrained_dict = torch.load(pretrained_path, map_location=device)

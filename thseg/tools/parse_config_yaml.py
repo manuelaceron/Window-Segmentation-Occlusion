@@ -25,12 +25,13 @@ def add_param(param_dict):
         os.mkdir(param_dict['save_dir'])
     if os.path.exists(param_dict['save_dir_model']) is False:
         os.mkdir(param_dict['save_dir_model'])
-    param_dict['train_list'] = os.path.join(cur_path, '{}/train_list_finetune.txt'.format(param_dict['data_name']))
-    param_dict['val_list'] = os.path.join(cur_path, '{}/val_list_finetune.txt'.format(param_dict['data_name']))
-    param_dict['test_list'] = os.path.join(cur_path, '{}/test_list.txt'.format(param_dict['data_name']))
+    param_dict['train_list'] = os.path.join(cur_path, '{}/train_list_{}.txt'.format(param_dict['data_name'], param_dict['dataset']))
+    param_dict['val_list'] = os.path.join(cur_path, '{}/val_list_{}.txt'.format(param_dict['data_name'], param_dict['dataset']))
+    param_dict['test_list'] = os.path.join(cur_path, '{}/test_list_{}.txt'.format(param_dict['data_name'], param_dict['dataset']))
     param_dict['model_dir'] = os.path.join(param_dict['save_dir_model'], './pth_{}/'.format(param_dict['model_name']))
     param_dict['pred_path'] = os.path.join(param_dict['save_dir_model'], param_dict['pred_path'])
     param_dict['pred_prob_path'] = os.path.join(param_dict['save_dir_model'], param_dict['pred_prob_path'])
+    param_dict['unct_path'] = os.path.join(param_dict['save_dir_model'], param_dict['unct_path'])
     param_dict['pretrained_model'] = os.path.join(param_dict['root_path'], param_dict['pretrained_model'])
 
     param_dict['color_table'] = list(np.asarray(param_dict['color_table'].split(',')).astype(np.int).reshape(-1, 3))

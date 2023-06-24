@@ -4,6 +4,9 @@ import torch.nn.functional as F
 import torch.utils.data
 import torch
 import pdb
+from ..deeplab.deeplabv3_plus import DeepLabV3Plus
+from ..deeplab.deeplabv3_plus import _ASPP
+import networkDL as network
 
 
 class conv_block(nn.Module):
@@ -19,7 +22,8 @@ class conv_block(nn.Module):
             nn.BatchNorm2d(num_class),
             nn.ReLU(inplace=True),
             nn.Conv2d(num_class, num_class, kernel_size=3, stride=1, padding=1, bias=True),
-            nn.BatchNorm2d(num_class)            
+            nn.BatchNorm2d(num_class), 
+            nn.Dropout(0.5) # Only for Bayeasian! comment unless is Bayesian TODO:          
             )
          
 
@@ -39,7 +43,8 @@ class up_conv(nn.Module):
             nn.Upsample(scale_factor=2),
             nn.Conv2d(in_c, num_class, kernel_size=3, stride=1, padding=1, bias=True),
             nn.BatchNorm2d(num_class),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5) # Only for Bayeasian! comment unless is Bayesian TODO:     
         )
 
     def forward(self, x):
@@ -123,7 +128,7 @@ class UNet(nn.Module):
 
         
 
-        out = self.activate(out)
+        #out = self.activate(out) #Comment this when using BCELogits
         
         return out
 
@@ -316,10 +321,11 @@ class ALKU_Net(nn.Module):
 
 
         k = 10
-        self.AlkModule1 = AlkModule(filters[0], filters[0], k, 1)
-        self.AlkModule2 = AlkModule(filters[1], filters[1], k, 1)
-        self.AlkModule3 = AlkModule(filters[2], filters[2], k, 1)
-        self.AlkModule4 = AlkModule(filters[3], filters[3], k, 1)
+        d= 1
+        self.AlkModule1 = AlkModule(filters[0], filters[0], k, d)
+        self.AlkModule2 = AlkModule(filters[1], filters[1], k, d)
+        self.AlkModule3 = AlkModule(filters[2], filters[2], k, d)
+        self.AlkModule4 = AlkModule(filters[3], filters[3], k, d)
 
         self.Up5 = up_conv(filters[4], filters[3])
         self.Up_conv5 = conv_block(filters[4], filters[3])
@@ -381,3 +387,288 @@ class ALKU_Net(nn.Module):
         out = self.activate(out)
         
         return out
+
+class ASPP_UNet(nn.Module):
+    def __init__(self, in_c=3, num_class=4, pretrained_path=None): 
+        super(ASPP_UNet, self).__init__()
+
+        n1 = 16
+        filters = [n1, n1 * 2, n1 * 4, n1 * 8, n1 * 16]
+
+        self.Maxpool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.Maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.Maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.Maxpool4 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        self.Conv1 = conv_block(in_c, filters[0]) #3,16
+        self.Conv2 = conv_block(filters[0], filters[1]) #16,32
+        self.Conv3 = conv_block(filters[1], filters[2]) #32,64
+        self.Conv4 = conv_block(filters[2], filters[3]) #64,128
+        self.Conv5 = conv_block(filters[3], filters[4]) #128,256
+
+        self.aspp1 = _ASPP(filters[0], [12, 24, 36], num_classannels = 16, norm_layer=nn.BatchNorm2d) 
+        self.aspp2 = _ASPP(filters[1], [12, 24, 36], num_classannels = 32, norm_layer=nn.BatchNorm2d) 
+        self.aspp3 = _ASPP(filters[2], [12, 24, 36], num_classannels = 64, norm_layer=nn.BatchNorm2d) 
+        self.aspp4 = _ASPP(filters[3], [12, 24, 36], num_classannels = 128, norm_layer=nn.BatchNorm2d) 
+
+        self.Up5 = up_conv(filters[4], filters[3]) #256,128
+        self.Up_conv5 = conv_block(filters[4], filters[3])
+
+        self.Up4 = up_conv(filters[3], filters[2])
+        self.Up_conv4 = conv_block(filters[3], filters[2])
+
+        self.Up3 = up_conv(filters[2], filters[1])
+        self.Up_conv3 = conv_block(filters[2], filters[1])
+
+        self.Up2 = up_conv(filters[1], filters[0])
+        self.Up_conv2 = conv_block(filters[1], filters[0])
+
+        self.Conv = nn.Conv2d(filters[0], num_class, kernel_size=3, stride=1, padding=1)
+
+        self.activate = nn.Softmax() if num_class > 1 else nn.Sigmoid()
+
+    def forward(self, x):
+        #encoding 
+        e1 = self.Conv1(x) #16
+
+        e2 = self.Maxpool1(e1)
+        e2 = self.Conv2(e2) #32
+
+        e3 = self.Maxpool2(e2)
+        e3 = self.Conv3(e3) #64
+
+        e4 = self.Maxpool3(e3)
+        e4 = self.Conv4(e4) #128
+
+        e5 = self.Maxpool4(e4)
+        e5 = self.Conv5(e5) #256
+
+        #decoding
+        d5 = self.Up5(e5) #128
+        e4 = self.aspp4(e4) #out 128 
+        
+        d5 = torch.cat((e4, d5), dim=1)
+        d5 = self.Up_conv5(d5) # 256, 128
+
+        d4 = self.Up4(d5)
+        e3 = self.aspp3(e3) #64
+        d4 = torch.cat((e3, d4), dim=1)
+        d4 = self.Up_conv4(d4) # 128, 64
+
+        d3 = self.Up3(d4)
+        e2 = self.aspp2(e2) #32
+        d3 = torch.cat((e2, d3), dim=1)
+        d3 = self.Up_conv3(d3) #64, 34
+
+        d2 = self.Up2(d3)
+        e1 = self.aspp1(e1) #16
+        d2 = torch.cat((e1, d2), dim=1)
+        d2 = self.Up_conv2(d2) #32, 16
+
+        out = self.Conv(d2) #16, 1
+               
+
+        #out = self.activate(out)
+        
+        return out
+
+class singleASPP_UNet(nn.Module):
+    def __init__(self, in_c=3, num_class=4, pretrained_path=None): 
+        super(singleASPP_UNet, self).__init__()
+
+        n1 = 16
+        filters = [n1, n1 * 2, n1 * 4, n1 * 8, n1 * 16]
+
+        self.Maxpool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.Maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.Maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.Maxpool4 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        self.Conv1 = conv_block(in_c, filters[0]) #3,16
+        self.Conv2 = conv_block(filters[0], filters[1]) #16,32
+        self.Conv3 = conv_block(filters[1], filters[2]) #32,64
+        self.Conv4 = conv_block(filters[2], filters[3]) #64,128
+        self.Conv5 = conv_block(filters[3], filters[4]) #128,256
+
+        rate=  [6,12,18] #[12,24,36]
+        self.aspp = _ASPP(filters[4], rate, norm_layer=nn.BatchNorm2d) 
+
+        self.Up5 = up_conv(filters[4], filters[3]) #256,128
+        self.Up_conv5 = conv_block(filters[4], filters[3])
+
+        self.Up4 = up_conv(filters[3], filters[2])
+        self.Up_conv4 = conv_block(filters[3], filters[2])
+
+        self.Up3 = up_conv(filters[2], filters[1])
+        self.Up_conv3 = conv_block(filters[2], filters[1])
+
+        self.Up2 = up_conv(filters[1], filters[0])
+        self.Up_conv2 = conv_block(filters[1], filters[0])
+
+        self.Conv = nn.Conv2d(filters[0], num_class, kernel_size=3, stride=1, padding=1)
+
+        self.activate = nn.Softmax() if num_class > 1 else nn.Sigmoid()
+
+    def forward(self, x):
+        #encoding 
+        e1 = self.Conv1(x) #16
+
+        e2 = self.Maxpool1(e1)
+        e2 = self.Conv2(e2) #32
+
+        e3 = self.Maxpool2(e2)
+        e3 = self.Conv3(e3) #64
+
+        e4 = self.Maxpool3(e3)
+        e4 = self.Conv4(e4) #128
+
+        e5 = self.Maxpool4(e4)
+        e5 = self.Conv5(e5) #256
+
+        e5 = self.aspp(e5) #out 
+
+        #decoding
+        d5 = self.Up5(e5) #128
+        d5 = torch.cat((e4, d5), dim=1)
+        d5 = self.Up_conv5(d5) # 256, 128
+
+        d4 = self.Up4(d5)
+        d4 = torch.cat((e3, d4), dim=1)
+        d4 = self.Up_conv4(d4) # 128, 64
+
+        d3 = self.Up3(d4)
+        d3 = torch.cat((e2, d3), dim=1)
+        d3 = self.Up_conv3(d3) #64, 34
+
+        d2 = self.Up2(d3)
+        d2 = torch.cat((e1, d2), dim=1)
+        d2 = self.Up_conv2(d2) #32, 16
+
+        out = self.Conv(d2) #16, 1
+               
+
+        #out = self.activate(out)
+        
+        return out
+
+
+class BayesianUNet(nn.Module):
+    """
+    UNet - Basic Implementation
+    Paper : https://arxiv.org/abs/1505.04597
+    """
+
+    def __init__(self, in_c=3, num_class=4, pretrained_path=None): 
+        super(BayesianUNet, self).__init__()
+
+        n1 = 16
+        filters = [n1, n1 * 2, n1 * 4, n1 * 8, n1 * 16]
+
+        self.Maxpool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.Maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.Maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.Maxpool4 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        self.Conv1 = conv_block(in_c, filters[0]) #3,16
+        self.Conv2 = conv_block(filters[0], filters[1]) #16,32
+        self.Conv3 = conv_block(filters[1], filters[2]) #32,64
+        self.Conv4 = conv_block(filters[2], filters[3]) #64,128
+        self.Conv5 = conv_block(filters[3], filters[4]) #128,256
+
+        self.Up5 = up_conv(filters[4], filters[3])
+        self.Up_conv5 = conv_block(filters[4], filters[3])
+
+        self.Up4 = up_conv(filters[3], filters[2])
+        self.Up_conv4 = conv_block(filters[3], filters[2])
+
+        self.Up3 = up_conv(filters[2], filters[1])
+        self.Up_conv3 = conv_block(filters[2], filters[1])
+
+        self.Up2 = up_conv(filters[1], filters[0])
+        self.Up_conv2 = conv_block(filters[1], filters[0])
+
+        self.Conv = nn.Conv2d(filters[0], num_class, kernel_size=3, stride=1, padding=1)
+
+        self.Drop = nn.Dropout(0.5)
+
+        self.activate = nn.Softmax() if num_class > 1 else nn.Sigmoid()
+
+    def forward(self, x):
+        e1 = self.Conv1(x)
+        e2 = self.Maxpool1(e1)
+
+        e2 = self.Conv2(e2)
+        e3 = self.Maxpool2(e2)
+
+        e3 = self.Conv3(e3)
+        e4 = self.Maxpool3(e3)
+
+        e4 = self.Conv4(e4)
+        e5 = self.Maxpool4(e4)
+
+        e5 = self.Conv5(e5)
+
+        d5 = self.Up5(e5)
+        d5 = torch.cat((e4, d5), dim=1)
+        d5 = self.Up_conv5(d5)
+
+        d4 = self.Up4(d5)
+        d4 = torch.cat((e3, d4), dim=1)
+        d4 = self.Up_conv4(d4)
+
+        d3 = self.Up3(d4)
+        d3 = torch.cat((e2, d3), dim=1)
+        d3 = self.Up_conv3(d3)
+
+        d2 = self.Up2(d3)
+        d2 = torch.cat((e1, d2), dim=1)
+        d2 = self.Up_conv2(d2)
+
+        out = self.Conv(d2)
+              
+
+        out = self.activate(out)
+        
+        return out
+
+class new_DeepL(nn.Module):
+    """
+    Convolution Block
+    """
+
+    def __init__(self, in_c, num_class, model = 'deeplabv3plus_resnet50'):
+        super(new_DeepL, self).__init__()
+        
+        self.model = network.modeling.__dict__[model](num_classes=num_class, output_stride=8) #8 or 16??? deeplabv3plus_mobilenet
+        self.activate = nn.Softmax() if num_class > 1 else nn.Sigmoid()
+            
+    def forward(self, x):
+        
+        x = self.model(x)
+        out = x
+        #out = self.activate(x) #Comment this if using BCEwithLogits
+        return out
+
+
+
+class DeepUNet(nn.Module):
+    """
+    Test DeepLabv3+ + Unet
+    UNet - Basic Implementation
+    Paper : https://arxiv.org/abs/1505.04597
+    """
+
+    def __init__(self, in_c=3, num_class=4, pretrained_path=None): 
+        super(DeepUNet, self).__init__()
+
+        #self.deepLab =  DeepLabV3Plus(in_c, num_class, pretrained_path) # DeepLab I was using originally
+        self.deepLab =  new_DeepL(in_c, num_class)
+        self.unet = UNet(in_c+1, num_class, pretrained_path)
+
+    def forward(self, x):
+
+        o1= self.deepLab(x)
+        ni = torch.cat((x,o1), dim = 1)
+        o2 = self.unet(ni) #sum? AND? cat
+        
+        return o1, o2

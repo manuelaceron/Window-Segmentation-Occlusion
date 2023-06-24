@@ -8,25 +8,50 @@ import matplotlib.pyplot as plt
 import os
 import pdb
 import torch.nn as nn
+import torchvision.transforms as transforms
 
 
-
+transform = transforms.Compose([ transforms.ToTensor()])
 image_driver = 'gdal'
 if image_driver == 'gdal':
     import yimage
     def read_image(path, state='img'):
         img = yimage.io.read_image(path)
-        img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_NEAREST)
-        if state == 'gt' or state == 'am':
+        
+        try:
+            img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_NEAREST)
             
-            if len(img.shape) > 2:
-                
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) #new
+                        
+        except:
+            print("Failed to resize {}".format(path))
+            raise
+        
+        if state == 'gt' or state == 'am': #Binary GT
+            
+            if len(img.shape) > 2 :  #TODO: put >2, for cityscapes ==2
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) #new TODO: Uncomment this!
                 # here input your label process function
                 img = np.where(img>0, 1, 0)
+
+            if len(img.shape) == 2:  #TODO: put >2, for cityscapes ==2
+                
+                # here input your label process function
+                img = np.where(img>0, 1, 0)    
+
+                
+                
+                
                 return img
             else:
                 return img
+        elif state == 'gt_val':
+            pdb.set_trace()
+            img = transform(img)
+            
+            img = torch.argmax(img, dim=0)
+
+            return img
+
         else:
             return img
 else:
@@ -85,9 +110,10 @@ def label_mapping(label_im):
     return label
 
 
-def out2pred(out, num_class=2, thread=0, prob=False):
+def out2pred(out, num_class=2, thread=0, prob=False, unct = False, thres= False):
     if num_class > 1:
         pred = torch.argmax(out, 1).detach().cpu().numpy()
+        output = pred
     else:
         
         #pred = out.float().cpu().data.numpy()[:, 0, :, :]*255
@@ -98,17 +124,45 @@ def out2pred(out, num_class=2, thread=0, prob=False):
         #
         #pdb.set_trace()
         if prob == False:
+            if unct == True:
 
-            # Create mask based on tresholding:
-            pred = out.cpu().data.numpy()[:, 0, :, :]
-            pred[pred >= thread] = 1
-            pred[pred < thread] = 0
+                if thres == True:
+                    
+                    pred = out.cpu().data.numpy()[:, 0, :, :]
+                    pred[pred <= thread] = 0
+                    pred[pred > thread] = 1
 
-            output = pred.astype(np.uint32)
+                    output = pred.astype(np.uint32)
+                    return output
+                
+                ###### black very faint#########
+                #pred = out.cpu().data.numpy()[:, 0, :, :]*255 
+                #output = pred.astype(np.uint32) #pred.astype(float)
+                #return output
+                ###############################
+
+                pred = out.float().cpu().data.numpy()[:, 0, :, :]*255
+                output = pred.astype(float)
+                return output
+
+
+            else:
+
+                # Create mask based on tresholding:
+                pred = out.cpu().data.numpy()[:, 0, :, :]
+                pred[pred >= thread] = 1
+                pred[pred < thread] = 0
+
+                output = pred.astype(np.uint32)
+                return output
 
         else:
             pred = out.float().cpu().data.numpy()[:, 0, :, :]*255
             output = pred.astype(float)
+            return output
+            
+        
+          
 
     return output
 

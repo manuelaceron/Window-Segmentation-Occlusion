@@ -2,7 +2,7 @@ import os
 import random
 import sys
 
-src_path = r'/home/cero_ma/MCV/window_benchmarks/originals/resized/ecp-occluded60/'
+src_path = r'/home/cero_ma/MCV/window_benchmarks/originals/resized/artdeco/'
 
 state = 'inference'
 

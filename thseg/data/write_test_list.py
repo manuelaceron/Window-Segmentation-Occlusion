@@ -3,11 +3,13 @@ import random
 import sys
 
 src_path = r'/home/cero_ma/MCV/window_benchmarks/originals/resized/ecp-ref-occ60/test'
-amodal = True #Input: image + visible mask
+amodal = False #Input: image + visible mask
 
 
 image_path = os.path.join(src_path, 'images')
-label_path = os.path.join(src_path, 'labels')
+#label_path = os.path.join(src_path, 'labels')
+label_path = os.path.join(src_path, 'occ_masks')
+
 if amodal:
     modal_path = "/home/cero_ma/MCV/window_benchmarks/originals/resized/ecp-ref-occ60/test/occ_labels/" #os.path.join(src_path, 'occ_labels')#"/home/cero_ma/MCV/code220419_windows/0401_files/Res_UNet_50_Pretrained_400e_oxford_robotcar_modal/ecp-occ60_inference/test/"#
 

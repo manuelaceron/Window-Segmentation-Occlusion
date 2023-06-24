@@ -145,8 +145,8 @@ class TransUNet(nn.Module):
     def forward(self, x):
         x, x1, x2, x3 = self.encoder(x)
         x = self.decoder(x, x1, x2, x3)
-
-        out = self.activate(x)
+        out = x
+        #out = self.activate(x)
 
         return out
 

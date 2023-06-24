@@ -1,0 +1,5 @@
+/home/cero_ma/MCV/cityscapes/leftImg8bit/train/munster/munster_000142_000019.png  /home/cero_ma/MCV/cityscapes/test_multiclass_mask/gtFine/train/munster/munster_000142_000019.png
+/home/cero_ma/MCV/cityscapes/leftImg8bit/train/munster/munster_000150_000019.png  /home/cero_ma/MCV/cityscapes/test_multiclass_mask/gtFine/train/munster/munster_000150_000019.png
+/home/cero_ma/MCV/cityscapes/leftImg8bit/train/munster/munster_000002_000019.png  /home/cero_ma/MCV/cityscapes/test_multiclass_mask/gtFine/train/munster/munster_000002_000019.png
+/home/cero_ma/MCV/cityscapes/leftImg8bit/train/munster/munster_000070_000019.png  /home/cero_ma/MCV/cityscapes/test_multiclass_mask/gtFine/train/munster/munster_000070_000019.png
+/home/cero_ma/MCV/cityscapes/leftImg8bit/train/munster/munster_000037_000019.png  /home/cero_ma/MCV/cityscapes/test_multiclass_mask/gtFine/train/munster/munster_000037_000019.png

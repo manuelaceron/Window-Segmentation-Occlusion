@@ -5,6 +5,7 @@ from PIL import Image
 import yimage
 from tools.utils import read_image
 import pdb
+from sklearn.metrics import confusion_matrix
 
 
 
@@ -50,10 +51,16 @@ def color_dict(labelFolder, classNum):
 
 def ConfusionMatrix(numClass, imgPredict, Label):
     #  返回混淆矩阵
+
+   
+
     mask = (Label >= 0) & (Label < numClass)
     label = numClass * Label[mask] + imgPredict[mask]
     count = np.bincount(label, minlength=numClass ** 2)
     confusionMatrix = count.reshape(numClass, numClass)
+
+    
+
     return confusionMatrix
 
 
@@ -112,7 +119,7 @@ def Frequency_Weighted_Intersection_over_Union(confusionMatrix):
     return FWIoU
 
 
-def get_acc_v2(label_all, predict_all, classNum=2, save_path='./'):
+def get_acc_v2(label_all, predict_all, classNum=2, save_path='./', file_name = 'accuracy.txt'):
     label_all = label_all.flatten()
     predict_all = predict_all.flatten()
     confusionMatrix = ConfusionMatrix(classNum, predict_all, label_all)
@@ -140,7 +147,7 @@ def get_acc_v2(label_all, predict_all, classNum=2, save_path='./'):
     print(mIOU)
     print("FWIoU:")
     print(FWIOU)
-    with open('{}/accuracy.txt'.format(save_path), 'w') as ff:
+    with open('{}/{}'.format(save_path, file_name), 'w') as ff:
         ff.writelines("confusion_matrix:\n")
         ff.writelines(str(confusionMatrix)+"\n")
         ff.writelines("precision:\n")

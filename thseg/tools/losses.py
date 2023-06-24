@@ -2,8 +2,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-#from sklearn.utils import class_weight
+from sklearn.utils import class_weight
 from tools.lovasz_losses import lovasz_softmax
+import pdb
 
 
 def make_one_hot(labels, classes):
@@ -17,11 +18,14 @@ def get_weights(target):
 
     classes, counts = np.unique(t_np, return_counts=True)
     cls_w = np.median(counts) / counts
-    # cls_w = class_weight.compute_class_weight('balanced', classes, t_np)
+    cls_w = class_weight.compute_class_weight('balanced', classes, t_np)
 
-    weights = np.ones(7)
+    pdb.set_trace()
+    weights = np.ones(2)
     weights[classes] = cls_w
-    return torch.from_numpy(weights).float().cuda()
+    out = torch.from_numpy(weights).float().cuda()
+    pdb.set_trace()
+    return out
 
 
 class CrossEntropyLoss2d(nn.Module):
@@ -30,19 +34,37 @@ class CrossEntropyLoss2d(nn.Module):
         self.CE = nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index, reduction=reduction)
 
     def forward(self, output, target):
+        
+        target = torch.argmax(target, dim=1)
         loss = self.CE(output, target)
         return loss
 
 class BCELoss(nn.Module):
-    def __init__(self, smooth=1., ignore_index=255):
+    def __init__(self, smooth=1., weight=None, ignore_index=255):
         super(BCELoss, self).__init__()
         self.ignore_index = ignore_index
         self.smooth = smooth
-        self.BCE = nn.BCELoss()
+        self.BCE = nn.BCELoss() #(reduction='none')Reduction none for BCNN
 
     def forward(self, output, target):
         output = output.squeeze(1)
         loss = self.BCE(output, target.float())
+        
+        return loss
+
+class BCELogLoss(nn.Module):
+    def __init__(self, smooth=1., weight=None, ignore_index=255):
+        super(BCELogLoss, self).__init__()
+        self.ignore_index = ignore_index
+        self.smooth = smooth
+        self.BCELog = nn.BCEWithLogitsLoss(pos_weight = weight)
+        
+
+    def forward(self, output, target):
+        
+        output = output.squeeze(1)
+        loss = self.BCELog(output, target.float())
+        
         return loss
 
 
@@ -69,14 +91,17 @@ class DiceLoss(nn.Module):
 class FocalLoss(nn.Module):
     def __init__(self, gamma=2, alpha=None, ignore_index=255, size_average=True):
         super(FocalLoss, self).__init__()
-        self.gamma = gamma
+        self.gamma = 4
+        self.alpha = 1
         self.size_average = size_average
-        self.CE_loss = nn.CrossEntropyLoss(reduce=False, ignore_index=ignore_index, weight=alpha)
+        #self.CE_loss = nn.CrossEntropyLoss(reduce=False, ignore_index=ignore_index, weight=alpha)
+        self.BCE_loss = nn.BCELoss(reduce=False)
 
     def forward(self, output, target):
-        logpt = self.CE_loss(output, target)
+        output = output.squeeze(1)
+        logpt = self.BCE_loss(output, target.float())
         pt = torch.exp(-logpt)
-        loss = ((1 - pt) ** self.gamma) * logpt
+        loss = ((1 - pt) ** self.gamma) * logpt * self.alpha
         if self.size_average:
             return loss.mean()
         return loss.sum()
@@ -109,6 +134,9 @@ class LovaszSoftmax(nn.Module):
 
 
 def get_loss(loss_type, class_weights=None):
+    print(loss_type, class_weights)
+    
+
     if loss_type == 'ce':
         if class_weights is not None:
             return CrossEntropyLoss2d()
@@ -124,5 +152,11 @@ def get_loss(loss_type, class_weights=None):
         return LovaszSoftmax()
     elif loss_type == 'bce':
         return BCELoss()
+    elif loss_type == 'bce_log':
+        # weigh for occlusion labels ECP-ref-occ60
+        #weight = torch.tensor([0.57487292, 3.83899089])
+
+        # weight for window labels ECP-ref-occ60 [0.63147511, 2.40150057])
+        return BCELogLoss(weight = class_weights[1])
     else:
         return None
