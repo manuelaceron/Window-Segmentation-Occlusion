@@ -7,7 +7,7 @@ src_path = r'/home/cero_ma/MCV/window_benchmarks/originals/resized/ecp-ref-occ60
 
 
 
-state = 'train'
+state = 'test'
 amodal = True #training input: image + visible mask
 
 image_path = os.path.join(src_path, state, 'images')
@@ -45,7 +45,7 @@ random.shuffle(images)
 #artdeco, graz: png
 #ECP, CMP: jpg
 
-with open('{}_list_ecpgraz-ref-occ60-all.txt'.format(state), 'a') as ff:
+with open('{}_ecp.txt'.format(state), 'a') as ff:
     for name in images:
         if name.split('.')[1] == 'jpg' :
             name_label = name.replace('jpg', 'png')
@@ -58,6 +58,8 @@ with open('{}_list_ecpgraz-ref-occ60-all.txt'.format(state), 'a') as ff:
         
             if not amodal:
                 cur_info = '{}  {}\n'.format(os.path.join(image_path, name), os.path.join(label_path, name_label)) 
+                #cur_info = '{},'.format(os.path.join(image_path, name))
+                #cur_info = '{},'.format(os.path.join(label_path, name_label))  
             else:
                 cur_info = '{}  {}  {}  {}  {}\n'.format(os.path.join(image_path, name), os.path.join(label_path, name_label), os.path.join(occ_path, name_modal), 
                 os.path.join(visible_path, name_label), os.path.join(hidden_path, name_label)) 

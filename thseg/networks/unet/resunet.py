@@ -110,7 +110,7 @@ class Res_UNet_50(nn.Module):
         out = F.interpolate(x, size=(size[2], size[3]), mode='bilinear')
         out = self.outc(out)
         #out = self.activate(out)
-        return out, x1, x2, x3, x4, x5
+        return out
 
 class Res_UNet_34(nn.Module):
     def __init__(self, in_c, num_class, bilinear=True):

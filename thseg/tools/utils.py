@@ -14,9 +14,10 @@ import torchvision.transforms as transforms
 transform = transforms.Compose([ transforms.ToTensor()])
 image_driver = 'gdal'
 if image_driver == 'gdal':
-    import yimage
+    #import yimage
     def read_image(path, state='img'):
-        img = yimage.io.read_image(path)
+        #img = yimage.io.read_image(path)
+        img = cv2.imread(path)
         
         try:
             img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_NEAREST)
@@ -153,6 +154,7 @@ def out2pred(out, num_class=2, thread=0, prob=False, unct = False, thres= False)
                 pred[pred >= thread] = 1
                 pred[pred < thread] = 0
 
+                
                 output = pred.astype(np.uint32)
                 return output
 

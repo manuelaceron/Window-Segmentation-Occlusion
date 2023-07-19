@@ -10,7 +10,7 @@ Original file is located at
 
 from torch.utils.data import Dataset, DataLoader
 from transformers import AdamW
-import torch
+import torch, math
 from torch import nn
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
@@ -42,45 +42,72 @@ def get_input_grad(model, samples):
 
     return grad_map
 
+def other_visualize_attention(all_attentions, name):
+    att_mat = torch.stack(all_attentions[0:3]).squeeze(1) #First layer
+    att_mat = torch.mean(att_mat, dim=1)
+
+    residual_att = torch.eye(att_mat.size(1), att_mat.size(2))
     
-def visualize_attention(attentions):
-    num_heads = attentions.shape[0]
-    num_tokens = attentions.shape[1]
-
-
-    #reshape(batch_size, -1, height, width)
+    aug_att_mat = att_mat.cpu() + residual_att
     
-    attentions = attentions.view(num_heads, num_tokens, num_tokens)
+    aug_att_mat = aug_att_mat / aug_att_mat.sum(dim=-1).unsqueeze(-1) #([3, 16384, 256])
 
-    # Normalize the attention weights across the sequence
-    attentions = torch.softmax(attentions, dim=0)
-    #pdb.set_trace()
-    #attentions = attentions.reshape(num_heads, 512, 512)
+    # Recursively multiply the weight matrices
+    joint_attentions = torch.zeros(aug_att_mat.size())
+    joint_attentions[0] = aug_att_mat[0]
 
-    # Create subplots for each head
-    fig, axs = plt.subplots(num_heads, 1, figsize=(8, 4*num_heads))
-    if num_heads == 1:
-        axs = [axs]  # Handle the case of a single head
+    for n in range(1, aug_att_mat.size(0)):
+        joint_attentions[n] = torch.matmul(aug_att_mat[n], joint_attentions[n-1])
+    
+    
 
-    # Plot the attention maps
-    for head in range(num_heads):
-        ax = axs[head]
-        ax.imshow(attentions[head].detach().cpu().numpy(), cmap='inferno', interpolation='nearest')
 
-        # Customize the plot
-        #ax.set_xticks(range(num_tokens))
-        #ax.set_yticks(range(num_tokens))
-        #ax.set_xticklabels(range(1, num_tokens+1))
-        #ax.set_yticklabels(range(1, num_tokens+1))
-        ax.set_xlabel('Input Tokens')
-        ax.set_ylabel('Output Tokens')
-        ax.set_title(f'Head {head+1} Attention')
+def visualize_attention(all_attentions, name):
+    
+    
+    for j in range(len(all_attentions)): # For all depths 16
+        
+        print(j)
+        attentions = all_attentions[j][0] #For i depth, and first image
+        
+        num_heads = attentions.shape[0]
+        num_tokens = attentions.shape[1]
+        depth = attentions.shape[2]
 
-    # Adjust spacing between subplots
-    plt.tight_layout()
 
-    # Show the plot
-    plt.show()
+        #reshape(batch_size, -1, height, width)
+        height = int(math.sqrt(num_tokens))
+        width = int(math.sqrt(num_tokens))
+        
+        
+        attentions = attentions.permute(0,2,1)
+
+        attentions = attentions.reshape(num_heads, height, width, depth)
+        
+        gray_att = torch.sum(attentions,3)
+        gray_att = gray_att / attentions.shape[3]
+
+        gray_att = attentions
+
+        head_mean = torch.mean(gray_att,0)
+        #head_mean = head_mean / gray_att.shape[0]
+        
+
+        # Plot the attention maps
+        fig = plt.figure(figsize=(30, 50))
+        for i in range(1):#num_heads):
+                a = fig.add_subplot(5, 4, i+1)
+                imgplot = plt.imshow(gray_att[i].data.cpu().numpy())
+                a.axis("off")
+                #a.set_title(names[i].split('(')[0], fontsize=30)
+        
+        
+        new_name = str(j)+'att_map_'+name
+        
+        plt.savefig(os.path.join(model_dir, new_name), bbox_inches='tight')
+        
+
+    
 
 class EarlyStopper:
     def __init__(self, patience=1, min_delta=0):
@@ -147,8 +174,8 @@ class ImageSegmentationDataset(Dataset):
         sample = {'image': image, 'mask': segmentation_map}
 
         if self.transforms is not None:
-            augmented = self.transforms(image=image, mask=segmentation_map) #Originally
-            #augmented = self.transforms(sample)
+            #augmented = self.transforms(image=image, mask=segmentation_map) #Originally
+            augmented = self.transforms(sample)
             
             
             encoded_inputs = self.feature_extractor(augmented['image'], augmented['mask'], return_tensors="pt")
@@ -245,8 +272,8 @@ def train():
     root_dir = '/home/cero_ma/MCV/window_benchmarks/originals/resized/ecp-ref-occ60/'
     feature_extractor = SegformerFeatureExtractor(align=False, reduce_zero_label=False)
 
-    train_dataset = ImageSegmentationDataset(root_dir=root_dir, feature_extractor=feature_extractor, transforms=transform)
-    valid_dataset = ImageSegmentationDataset(root_dir=root_dir, feature_extractor=feature_extractor, transforms=transform, train=False)
+    train_dataset = ImageSegmentationDataset(root_dir=root_dir, feature_extractor=feature_extractor, transforms=transform_train)#transform)
+    valid_dataset = ImageSegmentationDataset(root_dir=root_dir, feature_extractor=feature_extractor, transforms=transform_train)#transform, train=False)
 
     print("Number of training examples:", len(train_dataset))
     print("Number of validation examples:", len(valid_dataset))
@@ -257,7 +284,7 @@ def train():
 
     #visible windows torch.tensor([0.60757092, 2.8240482])
     #occlusions [0.57487292, 3.83899089]
-    criterion  = nn.CrossEntropyLoss(weight=torch.tensor([0.60757092, 2.8240482])).cuda()
+    criterion  = nn.CrossEntropyLoss(weight=torch.tensor([0.57487292, 3.83899089])).cuda()
     
 
 
@@ -277,7 +304,7 @@ def train():
     #                                                        num_labels=len(id2label), id2label=id2label, label2id=label2id,
     #                                                        reshape_last_stage=True)
 
-    model = SegformerForSemanticSegmentation.from_pretrained(pretrained_model_name_or_path = pre_model, ignore_mismatched_sizes=True, config = configuration_b2_shallow)
+    model = SegformerForSemanticSegmentation.from_pretrained(pretrained_model_name_or_path = pre_model, ignore_mismatched_sizes=True, config = configuration_b2)
     #model = SegformerForSemanticSegmentation(configuration)
     print(model.config)
     
@@ -314,10 +341,8 @@ def train():
                 optimizer.zero_grad()
 
                 # forward
-                outputs = model(pixel_values=pixel_values, labels=labels)
                 
-                #visualize_attention(outputs.attentions[3][0])
-
+                outputs = model(pixel_values=pixel_values, labels=labels)
                 
                 
 
@@ -325,7 +350,7 @@ def train():
                 upsampled_logits = nn.functional.interpolate(outputs.logits, size=labels.shape[-2:], mode="bilinear", align_corners=False)
                 
                 loss = criterion(upsampled_logits, labels)
-
+                
                 ######
 
                 predicted = upsampled_logits.argmax(dim=1)
@@ -433,7 +458,7 @@ def inference():
     #feature_extractor = SegformerFeatureExtractor(align=False, reduce_zero_label=False)
     
 
-    checkpoint_path =  os.path.join("/home/cero_ma/MCV/code220419_windows/0401_files/SegFormer_mitb2_newLr_CS/250valiou_best.pth")#model_dir, model_name)
+    checkpoint_path =  os.path.join("/home/cero_ma/MCV/code220419_windows/0401_files/occ: SegFormer/SegFormer_ecp_occ_b2_loss_aug_lr0_00006_preCityS/250valiou_best.pth")#model_dir, model_name)
     #"/home/cero_ma/MCV/code220419_windows/0401_files/test-SegFormer/"
 
     
@@ -454,7 +479,7 @@ def inference():
         print('gpu>1')  
         model = torch.nn.DataParallel(model, device_ids=gpu_list)
 
-    #model = torch.nn.DataParallel(model, device_ids=[0])
+    model = torch.nn.DataParallel(model, device_ids=[0])
     model.load_state_dict(state_dict)
     print('epoch: ', torch.load(checkpoint_path)['epoch'])
     
@@ -512,9 +537,13 @@ def inference():
         labels = batch[1].cuda()
 
         #print(pixel_values.shape)
+        
+        
+        outputs = model(pixel_values=pixel_values, output_attentions=True)# logits are of shape (batch_size, num_labels, height/4, width/4)
 
         
-        outputs = model(pixel_values=pixel_values)# logits are of shape (batch_size, num_labels, height/4, width/4)
+        
+
         #ERF(meter, pixel_values, optimizer, model, outputs)
         ###########################################
         
@@ -544,6 +573,7 @@ def inference():
 
         logits = outputs.logits.cpu()
         print('logits.shape: ', logits.shape)
+        
 
         # First, rescale logits to original image size
         upsampled_logits = nn.functional.interpolate(logits,
@@ -575,6 +605,13 @@ def inference():
             color_seg = color_seg[..., ::-1]
             
             cv2.imwrite(os.path.join(model_dir, 'test', annotations[n]), color_seg)
+            
+            #if annotations[n] == 'monge_86.png':
+                #other_visualize_attention(outputs.attentions, annotations[n])
+                #visualize_attention(outputs.attentions, annotations[n])
+                
+            
+
             n +=1
 
 
@@ -596,6 +633,10 @@ def inference():
             param_dict['num_class'] + 1 if param_dict['num_class'] == 1 else param_dict['num_class'],
             model_dir)
 
+    	
+
+    #torch.save(outputs.attentions, os.path.join(model_dir, 'segFormerOccAttention.t'))
+
 
 
 
@@ -615,7 +656,7 @@ HEIGHT = 512
 lr = 0.00006 # param_dict['base_lr'] #0.00006 originally used
 model_dir = param_dict['save_dir_model'] #'/home/cero_ma/MCV/code220419_windows/0401_files/test-SegFormer/'
 
-pre_model = "nvidia/mit-b2" #"nvidia/segformer-b2-finetuned-cityscapes-1024-1024" #"nvidia/mit-b2" #" # #"nvidia/segformer-b1-finetuned-cityscapes-1024-1024" # "nvidia/mit-b2"
+pre_model = "nvidia/segformer-b2-finetuned-cityscapes-1024-1024" #"nvidia/mit-b2" #" # #"nvidia/segformer-b1-finetuned-cityscapes-1024-1024" # "nvidia/mit-b2"
 model_name = '250valiou_best.pth' # '100model.pth') #
 
 gpu= param_dict['gpu_id'] #'4,5'
@@ -627,6 +668,7 @@ print('useful gpu count is {}'.format(gx))
 
 
 early_stopper = EarlyStopper(patience=param_dict['stop_pat'], min_delta=param_dict['stop_delta'])
+
 transform = aug.Compose([
     aug.Flip(p=0.5),
     #aug.RandomCrop(width=128, height=128), does not work for this dataset and task
@@ -639,8 +681,8 @@ transform_train = standard_transforms.Compose([
             tr.RandomHorizontalFlip(),
             tr.RandomVerticalFlip(),
             tr.ScaleNRotate(rots=(-15, 15), scales=(0.9, 1.1)),
-            tr.FixedResize(param_dict['img_size']),
-            tr.Normalize(mean=param_dict['mean'], std=param_dict['std'])
+            tr.FixedResize(param_dict['img_size'])
+            #tr.Normalize(mean=param_dict['mean'], std=param_dict['std'])
             ])  # data pocessing and data augumentation
 transform_val = standard_transforms.Compose([
         tr.FixedResize(param_dict['img_size']),

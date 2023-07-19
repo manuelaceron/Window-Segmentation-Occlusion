@@ -2,9 +2,10 @@ from __future__ import print_function, division
 import os
 import cv2
 import numpy as np
+import torch
 from torch.utils.data import Dataset
 from tools import utils
-import pdb
+import pdb, json
 
 
 
@@ -60,8 +61,9 @@ class AmodalSegmentation(Dataset):
                  transform=None,
                  occSegFormer = False,
                  inference = False,
-                 feature_extractor = None
-
+                 feature_extractor = None,
+                 sf_transform = None,
+                 processor = None
                  ):
         self.list_sample = open(txt_path, 'r').readlines()
         self.num_sample = len(self.list_sample)
@@ -72,6 +74,16 @@ class AmodalSegmentation(Dataset):
         self.feature_extractor = feature_extractor
         self.occSegFormer = occSegFormer
         self.inference = inference
+
+        self.processor = processor
+        
+        ann_file = "/home/cero_ma/MCV/code220419_windows/thseg/runs/labelme2coco/ecp-refined-coco.json"
+        with open(ann_file, 'r') as f:
+            self.coco = json.load(f)
+        
+        self.coco['images'] = sorted(self.coco['images'], key=lambda x: x['id'])
+        self.ann_folder = "/home/cero_ma/MCV/window_benchmarks/originals/resized/ecp-ref-occ60/train/labels/"
+        
         
 
     def __len__(self):
@@ -79,11 +91,17 @@ class AmodalSegmentation(Dataset):
         # return 256
 
     def __getitem__(self, index):
-        _img, _target, img_path, gt_path, _occ, occ_path, _hidden, hidden_path, _visible, visible_path = self._make_img_gt_point_pair(index)
-        sample = {'image': _img, 'gt': _target, 'occ': _occ, 'visible_mask': _visible, 'hidden_mask': _hidden}
+        
+        
+        
+        _img, _target, img_path, gt_path, _occ, occ_path, _hidden, hidden_path, _visible, visible_path , ann_json= self._make_img_gt_point_pair(index) 
+        sample = {'image': _img, 'gt': _target, 'img_sf': _img, 'occ': _occ, 'visible_mask': _visible, 'hidden_mask': _hidden}
+        
         
         if self.transform is not None:
             sample = self.transform(sample)
+
+            
         
         
         sample['img_path'] = img_path
@@ -91,21 +109,56 @@ class AmodalSegmentation(Dataset):
         sample['occ_path'] = occ_path
         sample['visible_path'] = visible_path
         sample['hidden_path'] = hidden_path
+        
+        
+        
+        #annotation: image_id (image), id (object id)
+        img_name = img_path.split('/')[-1].split('.')[0]
+        ann_name = self.coco['images'][index]['file_name'].split('\\')[-1].split('.')[0]
+
+        the_id = [item for item in self.coco['images'] if img_name in item['file_name']][0]['id']
+
+        ann_info = {'image_id': the_id,
+            'annotations': [item for item in self.coco['annotations'] if item['image_id'] == the_id],
+            'images': [item for item in self.coco['images'] if img_name in item['file_name']]}
+
+        
+        ann_info.update(resize_annotation(ann_info, (ann_info['images'][0]['height'],ann_info['images'][0]['width']), (_img.shape[0], _img.shape[1]) ) )
+        encoding = self.processor(images=_img, annotations=ann_info, masks_path=self.ann_folder, return_tensors="pt")
+        pixel_values = encoding["pixel_values"].squeeze() # remove batch dimension
+        pro_target = encoding["labels"][0]
+        
+        #sample['ann'] = ann_info
+        sample['pixel_values'] = pixel_values
+        sample['pro_target'] = pro_target
+
+        #TODO: Instead of pixel_values (1 to all real pixels, I need pixel values from occlusion mask, )
+        
 
         #pdb.set_trace()
         if self.occSegFormer:
-            sf_img= sample['image'].numpy()
-            sf_occ = sample['occ'].numpy() #GT occlusions
-            sf_img = np.transpose(sf_img, (1, 2, 0))
-            sf_occ = np.squeeze(sf_occ, 0)
+
+            #if self.inference: # No transformation
+            #    sf_img= _img
+            #else: #Sf transformations
+            #    pdb.set_trace()
+            #    augmented = self.sf_transform(image=_img, mask=_occ)
+            #    sf_img= augmented['image']
+            #    sf_occ = augmented['mask']
+
+            #sf_img= _img       
+            #sf_occ = _occ #sample['occ'].numpy() #GT occlusions
+            #sf_img = np.transpose(sf_img, (1, 2, 0))
+            #sf_occ = np.squeeze(sf_occ, 0)
+
             
             if self.inference:
-                encoded_inputs = self.feature_extractor(sf_img, return_tensors="pt").pixel_values
-                
+                encoded_inputs = self.feature_extractor(_img, return_tensors="pt").pixel_values
                 encoded_inputs.squeeze_()
                 sample['df_fimage'] = encoded_inputs
             else:
-                encoded_inputs = self.feature_extractor(sf_img, sf_occ, return_tensors="pt")
+                
+                encoded_inputs = self.feature_extractor(sample['img_sf'], sample['occ'], return_tensors="pt")
                 for k,v in encoded_inputs.items():
                     encoded_inputs[k].squeeze_() # remove batch dimension
                 
@@ -118,7 +171,11 @@ class AmodalSegmentation(Dataset):
         return sample
 
     def _make_img_gt_point_pair(self, index):
+        
         file = self.list_sample[index].strip()
+
+        
+
         
         
         img_path = file.split('  ')[0] #RGB image
@@ -131,13 +188,23 @@ class AmodalSegmentation(Dataset):
         _img = utils.read_image(os.path.join(img_path))
         _target = utils.read_image(os.path.join(gt_path), 'gt').astype(np.int32)
         _occ = utils.read_image(os.path.join(occ_path), 'gt').astype(np.int32)
-        
-        
         _hidden = utils.read_image(os.path.join(hidden_path), 'am').astype(np.int32)
-        
         _visible = utils.read_image(os.path.join(visible_path), 'am').astype(np.int32)
+
+
+        json_name=img_path.split('/')[-1].split('.')[0]+'.json'
+        mode = img_path.split('/')[-3]
+        json_root = "/home/cero_ma/MCV/window_benchmarks/originals/split-json-rectified/coco/ecp/"
+        json_path = os.path.join(json_root,mode,json_name)
         
-        return _img, _target, img_path, gt_path, _occ, occ_path, _hidden, hidden_path, _visible, visible_path
+        with open(json_path, 'r') as f:
+            ann_json = json.load(f)
+        
+        #ann_json = extract_json_info(ann_json)
+        
+        
+        
+        return _img, _target, img_path, gt_path, _occ, occ_path, _hidden, hidden_path, _visible, visible_path, ann_json
 
 class InferenceSegmentation(Dataset):
     """
@@ -178,3 +245,81 @@ class InferenceSegmentation(Dataset):
         
         return _img, img_path, folder 
 
+def extract_json_info(ann_file):
+    
+    ori_h = ann_file['imageHeight']
+    ori_w =ann_file['imageWidth']
+    target_h = target_w = 512
+
+    window_objects = []
+    out = []
+    max_windows = 400
+    
+    for shape in ann_file['shapes']:
+        if shape['label'] == 'window':
+            points = shape['points']
+            original_coords = [
+                points[0][0],
+                points[0][1],
+                points[1][0],
+                points[1][1]
+            ]
+            resized_coords = resize_coordinates(original_coords, ori_h, ori_w, target_h, target_w)
+            window_objects.append(resized_coords)
+   
+    padded_coordinates = torch.zeros((max_windows, 4))
+
+    for i, coord in enumerate(window_objects):
+        padded_coordinates[i] = torch.tensor(coord)
+
+    
+    print('padded_coordinates', len(padded_coordinates))
+    return padded_coordinates
+    
+    
+def resize_coordinates(coords, original_height, original_width, new_height, new_width):
+    
+    ratio_width = new_width / original_width
+    ratio_height = new_height / original_height
+
+    resized_coords = [
+        int(coords[0] * ratio_width),
+        int(coords[1] * ratio_height),
+        int(coords[2] * ratio_width),
+        int(coords[3] * ratio_height)
+    ]
+
+    return resized_coords
+
+def resize_annotation(annotation, orig_size, target_size):
+
+    ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(target_size, orig_size))
+    ratio_height, ratio_width = ratios
+    
+    for key, value in annotation.items():
+        
+        if key == 'annotations':            
+            for val in value:
+                
+                
+                boxes = val['bbox']
+                scaled_boxes = boxes * np.asarray([ratio_width, ratio_height, ratio_width, ratio_height], dtype=np.float32)
+                val['bbox'] =  scaled_boxes
+
+                
+                area = val['area']
+                scaled_area = area * (ratio_width * ratio_height)
+                val['area'] = scaled_area
+
+                val['size'] = target_size
+                
+                # Object class
+                #if val['category_id'] == 0:
+                #    val['category_id'] = 1
+                #else:
+                #    val['category_id'] = val['category_id']
+
+
+    
+             
+    return annotation           

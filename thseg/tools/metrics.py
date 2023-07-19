@@ -2,7 +2,6 @@ import numpy as np
 import cv2
 import os
 from PIL import Image
-import yimage
 from tools.utils import read_image
 import pdb
 from sklearn.metrics import confusion_matrix
@@ -52,11 +51,12 @@ def color_dict(labelFolder, classNum):
 def ConfusionMatrix(numClass, imgPredict, Label):
     #  返回混淆矩阵
 
-   
+    #confusion_matrix(Label, imgPredict)
 
     mask = (Label >= 0) & (Label < numClass)
     label = numClass * Label[mask] + imgPredict[mask]
     count = np.bincount(label, minlength=numClass ** 2)
+    #pdb.set_trace()
     confusionMatrix = count.reshape(numClass, numClass)
 
     

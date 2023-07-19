@@ -49,6 +49,7 @@ class Normalize(object):
         self.std = std
 
     def __call__(self, sample):
+        
         sample['image'] = sample['image']/255.0
         sample['image'] = sample['image']-self.mean
         sample['image'] = sample['image']/self.std
@@ -340,21 +341,26 @@ class adjustSaturation(object):
 
 class ToTensor(object):
     """Convert ndarrays in sample to Tensors."""
+    def __init__(self, do_not = {}):
+        
+        self.do_not = do_not
+        
 
     def __call__(self, sample):
-
+        
         for elem in sample.keys():
-            tmp = sample[elem].astype(np.float32)
+            if elem not in self.do_not:
+                tmp = sample[elem].astype(np.float32)
 
-            if tmp.ndim == 2:
-                tmp = tmp[:, :, np.newaxis]
+                if tmp.ndim == 2:
+                    tmp = tmp[:, :, np.newaxis]
 
-            # swap color axis because
-            # numpy image: H x W x C
-            # torch image: C X H X W
+                # swap color axis because
+                # numpy image: H x W x C
+                # torch image: C X H X W
 
-            tmp = tmp.transpose((2, 0, 1))
-            sample[elem] = torch.from_numpy(tmp).float()
+                tmp = tmp.transpose((2, 0, 1))
+                sample[elem] = torch.from_numpy(tmp).float()
 
         return sample
 

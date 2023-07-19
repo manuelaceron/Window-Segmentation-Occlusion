@@ -1,18 +1,18 @@
-batch_size: 6 #16 cityscapes #5  # If LastDrop is False, check this value for DeepLab, Graz (4) and set True, ECP(6), ArtDeco (5)
+batch_size: 2 #16 cityscapes #5  # If LastDrop is False, check this value for DeepLab, Graz (4) and set True, ECP(6), ArtDeco (5)
 img_size: 512  # 
 overlap: 64
-epoches: 300 #300
+epoches: 400 #300
 base_lr: 0.001 #0.00006 #0.001 # 0.001 #0.007 #0.0001 0.01
-weight_decay: 0.0001 #0.00002 # #
+weight_decay: 0.001 #0.00002 # #
 momentum: 0.9
 power: 0.99
-gpu_id: '4,5'
+gpu_id: '1,2' 
 save_iter: 10
 num_workers: 0 #check how this works
 val_visual: True
 image_driver: 'gdal'   #pillow, gdal
 color_table: 0,0,0,255,255,255,0,255,0,0,0,255
-loss_type_w: 'bce_log' #'bce'
+loss_type_vis: 'bce_log' #'bce'
 loss_type_occ: 'ce' #'bce'
 loss_type: 'bce_log' #'bce_log' #
 num_class: 1  # some parameters
@@ -21,17 +21,20 @@ thread: 0.5
 input_bands: 3
 
 two-steps: False
-use-fixed-model: False
+use-fixed-model: True
+use-fixed-visi-model: True
 three-steps: False
 fine-tune-DL: False # For using new DeepLab
+adversarial: True
+inp_model: MAT #DFV2 #MAT
 
 bk_pretrained: False #'/home/cero_ma/MCV/cityscapes/pretrained-models/best_deeplabv3plus_mobilenet_cityscapes_os16.pth' # "/home/cero_ma/MCV/cityscapes/pretrained-models/best_deeplabv3plus_resnet101_cityscapes_os16.pth" 
 
 resume_ckpt: False # "/home/cero_ma/MCV/code220419_windows/0401_files/segFormer_ResUnet50_ecp_1/pth_segFormer_ResUnet50/240valiou_best.pth" 
-model_name: Res_UNet_50 #OccSeg_deepParsing #BCNN #'PSPNet_of' #'SegFormer' # #'BayesianUNet'#'' #'TransUNet' #''#'DeepLabV3Plus' #'' #'Res_UNet_50' # #'UNet'  #AttU_Net
+model_name: MAT #OccSeg_deepParsing #BCNN #'PSPNet_of' #'SegFormer' # #'BayesianUNet'#'' #'TransUNet' #''#'DeepLabV3Plus' #'' #'Res_UNet_50' # #'UNet'   winCompletionAtt#AttU_Net
 pretrained_model: None #'/home/cero_ma/MCV/code220419_windows/0401_files/DeepLabV3Plus_cityscapes/pth_DeepLabV3Plus/70model.pth' #None #'valiou_best.pth' #None
 extra_loss: False
-model_experision: 'ecp_visible' #'ecp-occSeg-deepFacade2' #'initial_pretrainedDL_cityS' #'cityscapes'
+model_experision: ecp_fixed_optimizerNoccAugm_addMask #ecp_fixed_optimizerNoccAugm_noVisithres
 dataset: ecp-ref-occ60-all #ecp-ref-occ60-all #'cityscapes_multi' #'ecp-ref-occ60-occ-masks' #label-mask'
 
 vis_graph: False
@@ -54,6 +57,6 @@ bayesian: False
 by_steps: 3
 unct_path: 'unct_result'
 
-stop_pat: 20
+stop_pat: 100
 stop_delta: 0.01
 

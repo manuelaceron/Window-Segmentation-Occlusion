@@ -127,6 +127,7 @@ class NLayerDiscriminator(nn.Module):
 
     def forward(self, input):
         """Standard forward."""
+        
         outputs = self.model(input)
 
         if self.use_sigmoid:

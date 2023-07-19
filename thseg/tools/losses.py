@@ -75,27 +75,41 @@ class DiceLoss(nn.Module):
         self.smooth = smooth
 
     def forward(self, output, target):
-        if self.ignore_index not in range(target.min(), target.max()):
-            if (target == self.ignore_index).sum() > 0:
-                target[target == self.ignore_index] = target.min()
-        target = make_one_hot(target.unsqueeze(dim=1), classes=output.size()[1])
-        output = F.softmax(output, dim=1)
-        output_flat = output.contiguous().view(-1)
-        target_flat = target.contiguous().view(-1)
-        intersection = (output_flat * target_flat).sum()
-        loss = 1 - ((2. * intersection + self.smooth) /
-                    (output_flat.sum() + target_flat.sum() + self.smooth))
+        
+        #if self.ignore_index not in range(target.min(), target.max()):
+        #    if (target == self.ignore_index).sum() > 0:
+        #        target[target == self.ignore_index] = target.min()
+        #target = make_one_hot(target.unsqueeze(dim=1), classes=output.size()[1])
+        
+        #output = output.sigmoid()
+        #output_flat = output.contiguous().view(-1)
+        #target_flat = target.contiguous().view(-1)
+        #intersection = (output_flat * target_flat).sum()
+        #loss = 1 - ((2. * intersection + self.smooth) /
+        #            (output_flat.sum() + target_flat.sum() + self.smooth))
+
+        
+        output = output.sigmoid()
+        output = output.flatten(1)
+        target = target.unsqueeze(1)
+        target = target.flatten(1)
+        numerator = 2 * (output * target).sum(1)
+        denominator = output.sum(-1) + target.sum(-1)
+        loss = 1 - (numerator + 1) / (denominator + 1)
+        return loss.sum()
+
         return loss
 
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma=2, alpha=None, ignore_index=255, size_average=True):
         super(FocalLoss, self).__init__()
-        self.gamma = 4
-        self.alpha = 1
+        self.gamma = 2
+        self.alpha = 0.5
         self.size_average = size_average
         #self.CE_loss = nn.CrossEntropyLoss(reduce=False, ignore_index=ignore_index, weight=alpha)
-        self.BCE_loss = nn.BCELoss(reduce=False)
+        #self.BCE_loss = nn.BCELoss(reduce=False)
+        self.BCE_loss = nn.BCEWithLogitsLoss()
 
     def forward(self, output, target):
         output = output.squeeze(1)

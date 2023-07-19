@@ -69,16 +69,16 @@ class UNet(nn.Module):
         self.Maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2)
         self.Maxpool4 = nn.MaxPool2d(kernel_size=2, stride=2)
         
-        self.Conv1 = conv_block(in_c, filters[0]) #3,16
-        self.Conv2 = conv_block(filters[0], filters[1]) #16,32
-        self.Conv3 = conv_block(filters[1], filters[2]) #32,64
-        self.Conv4 = conv_block(filters[2], filters[3]) #64,128
-        self.Conv5 = conv_block(filters[3], filters[4]) #128,256
+        self.Conv1 = conv_block(in_c, filters[0]) #3,16 - 256
+        self.Conv2 = conv_block(filters[0], filters[1]) #16,32 - 128
+        self.Conv3 = conv_block(filters[1], filters[2]) #32,64 -64
+        self.Conv4 = conv_block(filters[2], filters[3]) #64,128 -32
+        self.Conv5 = conv_block(filters[3], filters[4]) #128,256 -16
 
-        self.Up5 = up_conv(filters[4], filters[3])
-        self.Up_conv5 = conv_block(filters[4], filters[3])
+        self.Up5 = up_conv(filters[4], filters[3]) #256 -> 128
+        self.Up_conv5 = conv_block(filters[4], filters[3]) #256 -> 128
 
-        self.Up4 = up_conv(filters[3], filters[2])
+        self.Up4 = up_conv(filters[3], filters[2]) #128 -> 64
         self.Up_conv4 = conv_block(filters[3], filters[2])
 
         self.Up3 = up_conv(filters[2], filters[1])
@@ -101,12 +101,12 @@ class UNet(nn.Module):
         e3 = self.Conv3(e3)
 
         e4 = self.Maxpool3(e3)
-        e4 = self.Conv4(e4)
+        e4 = self.Conv4(e4) #128 -32,32
 
         e5 = self.Maxpool4(e4)
-        e5 = self.Conv5(e5)
+        e5 = self.Conv5(e5) #256 -16,16
 
-        d5 = self.Up5(e5)
+        d5 = self.Up5(e5) # 128 -32,32
         d5 = torch.cat((e4, d5), dim=1)
 
         d5 = self.Up_conv5(d5)
