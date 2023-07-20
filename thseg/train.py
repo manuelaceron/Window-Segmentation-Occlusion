@@ -28,7 +28,6 @@ from transformers import SegformerFeatureExtractor, SegformerForSemanticSegmenta
 from transformers import AdamW
 import albumentations as aug
 from networks.MAT.networks.mat import Generator, Discriminator
-from networks.MAT.networks.my_own_mat import Generator as myOwnGenerator
 from networks.DeepFillV2.networks import Generator as DFV2_Generator
 from networks.DeepFillV2.networks import Discriminator as DFV2_Discriminator
 import networks.DeepFillV2.losses as  gan_losses
@@ -145,20 +144,21 @@ def collate_fn(batch):
     n_batch["gt"] = inputs[1]
     n_batch["img_sf"] = inputs[2]
     n_batch["occ"] = inputs[3]
-    n_batch["visible_mask"] = inputs[4]
-    n_batch["hidden_mask"] = inputs[5]
-    n_batch["img_path"] = inputs[6]
-    n_batch["gt_path"] = inputs[7]
-    n_batch["occ_path"] = inputs[8]
-    n_batch["visible_path"] = inputs[9]
-    n_batch["hidden_path"] = inputs[10]
+    n_batch["occ_sf"] = inputs[4]
+    n_batch["visible_mask"] = inputs[5]
+    n_batch["hidden_mask"] = inputs[6]
+    n_batch["img_path"] = inputs[7]
+    n_batch["gt_path"] = inputs[8]
+    n_batch["occ_path"] = inputs[9]
+    n_batch["visible_path"] = inputs[10]
+    n_batch["hidden_path"] = inputs[11]
     
-    n_batch["pixel_values"] = inputs[11]
-    n_batch["pro_target"] = inputs[12]
+    n_batch["pixel_values"] = inputs[12]
+    n_batch["pro_target"] = inputs[13]
     
     if param_dict['use-fixed-model']: 
-        n_batch['df_fimage'] = inputs[13]
-        n_batch['df_fooc'] = inputs[14]
+        n_batch['df_fimage'] = inputs[14]
+        n_batch['df_fooc'] = inputs[15]
 
     
 
@@ -201,11 +201,11 @@ def main():
         tr.ScaleNRotate(rots=(-15, 15), scales=(0.9, 1.1)),
         tr.FixedResize(param_dict['img_size']),
         tr.Normalize(mean=param_dict['mean'], std=param_dict['std']),
-        tr.ToTensor(do_not = {'img_sf', 'occ'})])  # data pocessing and data augumentation
+        tr.ToTensor(do_not = {'img_sf', 'occ_sf'})])  # data pocessing and data augumentation
     composed_transforms_val = standard_transforms.Compose([
         tr.FixedResize(param_dict['img_size']),
         tr.Normalize(mean=param_dict['mean'], std=param_dict['std']),
-        tr.ToTensor(do_not = {'img_sf', 'occ'})])  # data pocessing and data augumentation
+        tr.ToTensor(do_not = {'img_sf', 'occ_sf'})])  # data pocessing and data augumentation
 
     
     if param_dict['two-steps'] or param_dict['three-steps']:
@@ -353,8 +353,8 @@ def main():
             D = NLayerDiscriminator(input_nc=im_channel+1)
             
             optimizerG = torch.optim.Adam(G.parameters(), lr=param_dict['base_lr'], betas=[0, 0.99], eps=1e-8) 
-            lr_schedule = torch.optim.lr_scheduler.StepLR(optimizerG, step_size=30, gamma=0.8)
-            optimizerD = torch.optim.Adam(D.parameters(), lr=param_dict['base_lr'], betas=[0, 0.99], eps=1e-8)
+            optimizerD = torch.optim.Adam(D.parameters(), lr=param_dict['base_lr'], betas=[0, 0.99], eps=1e-8) #TODO: is working with this???
+            lr_schedule = torch.optim.lr_scheduler.StepLR(optimizerG, step_size=30, gamma=0.8)            
             lr_scheduleD = torch.optim.lr_scheduler.StepLR(optimizerD, step_size=30, gamma=0.8)
 
         # DeepFillV2
@@ -399,7 +399,7 @@ def main():
                 num_classes=param_dict['num_class'],
                 eos_coef=0.1,
             )
-    #criterionDetr.cuda()
+    criterionDetr.cuda()
     if param_dict['adversarial']:
         # loss
         adv_loss = AdversarialLoss('nsgan').cuda()
@@ -622,8 +622,9 @@ def main():
                         gen_input_fake_stg1 = img_stg1
                         gen_fake = D(torch.cat([visible, gen_input_fake],1))
                         gen_fake_stg1 = D(torch.cat([visible, gen_input_fake_stg1],1))
+                        # The mean is just a test, all the implementations so far dont use mean...
                         gen_gan_loss = adv_loss(gen_fake, True, False) + adv_loss(gen_fake_stg1, True, False)+ L1_loss(gen_input_fake, labels) + criterion(gen_input_fake, torch.squeeze(labels,1)) + criterion(gen_input_fake_stg1, torch.squeeze(labels,1))
-                        gen_loss += gen_gan_loss 
+                        gen_loss += gen_gan_loss.mean()
 
                         # update
                     
@@ -898,12 +899,18 @@ def main():
                 ff.writelines(str(cur_log))
                 
                 if epoch >= 3:#val_miou > best_val_acc:
-
-                    checkpoint = {
-                            "net": G.state_dict(),
-                            'optimizer': optimizerG.state_dict(),
-                            "epoch": epoch,
-                            'lr_schedule': lr_schedule.state_dict()}
+                    if param_dict['adversarial']:
+                        checkpoint = {
+                                "net": G.state_dict(),
+                                'optimizer': optimizerG.state_dict(),
+                                "epoch": epoch,
+                                'lr_schedule': lr_schedule.state_dict()}
+                    else: 
+                        checkpoint = {
+                                "net": model.state_dict(),
+                                'optimizer': optimizer.state_dict(),
+                                "epoch": epoch,
+                                'lr_schedule': lr_schedule.state_dict()}
                     
                     if val_miou > best_val_acc:
                         name= str(epoch)+'valiou_best.pth'
@@ -1112,14 +1119,15 @@ def eval(valloader, model, model2, model3, criterion, criterion2, criterion3, ep
                 occ = torch.unsqueeze(occ, 1)
 
                 if param_dict['inp_model'] == "MAT":
-                    thread = 0.5
-                    visible[visible >= thread] = 1
-                    visible[visible < thread] = 0
+                    #thread = 0.5
+                    #visible[visible >= thread] = 1
+                    #visible[visible < thread] = 0
 
                     mask = 1 - occ.float()   
-                    #c = torch.zeros([1, 0]).cuda()
+                    c = torch.zeros([param_dict['batch_size'], 0]).cuda() #Did i used initially woth this?
                     z = torch.randn(param_dict['batch_size'], 512).cuda()
-                    outputs = model(visible, mask, z, None) 
+                    
+                    outputs  = model(visible, mask, z, c) #None ->c
                     mask_losses = criterion(outputs,labels) 
                     
                     vallosses = mask_losses

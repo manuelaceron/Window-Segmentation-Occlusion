@@ -28,6 +28,7 @@ from sklearn.metrics import jaccard_score
 from torchvision.utils import make_grid
 import matplotlib.pyplot as plt
 from networks.MAT.networks.mat import Generator
+from networks.DeepFillV2.networks import Generator as DFV2_Generator
 
 def pos_process_boxes(add_out):
 
@@ -278,21 +279,23 @@ def collate_fn(batch):
 
     n_batch["image"] = inputs[0]
     n_batch["gt"] = inputs[1]
-    n_batch["occ"] = inputs[2]
-    n_batch["visible_mask"] = inputs[3]
-    n_batch["hidden_mask"] = inputs[4]
-    n_batch["img_path"] = inputs[5]
-    n_batch["gt_path"] = inputs[6]
-    n_batch["occ_path"] = inputs[7]
-    n_batch["visible_path"] = inputs[8]
-    n_batch["hidden_path"] = inputs[9]
+    n_batch["img_sf"] = inputs[2]
+    n_batch["occ"] = inputs[3]
+    n_batch["occ_sf"] = inputs[4]
+    n_batch["visible_mask"] = inputs[5]
+    n_batch["hidden_mask"] = inputs[6]
+    n_batch["img_path"] = inputs[7]
+    n_batch["gt_path"] = inputs[8]
+    n_batch["occ_path"] = inputs[9]
+    n_batch["visible_path"] = inputs[10]
+    n_batch["hidden_path"] = inputs[11]
     
-    n_batch["pixel_values"] = inputs[10]
-    n_batch["pro_target"] = inputs[11]
+    n_batch["pixel_values"] = inputs[12]
+    n_batch["pro_target"] = inputs[13]
     
     if param_dict['use-fixed-model']: 
-        n_batch['df_fimage'] = inputs[12]
-        n_batch['df_fooc'] = inputs[13]
+        n_batch['df_fimage'] = inputs[14]
+        n_batch['df_fooc'] = inputs[15]
 
     
 
@@ -356,13 +359,14 @@ def test(testloader, model, epoch):
 
     if param_dict['adversarial']:
 
-        checkpoint_path = os.path.join(param_dict['model_dir'], '360valiou_best.pth')  # load checkpoint
+        checkpoint_path = os.path.join(param_dict['model_dir'], '350valiou_best.pth')  # load checkpoint
         state_dict = torch.load(checkpoint_path)['net']
 
         im_channel = 1
         if param_dict['inp_model'] == "MAT":
             G = Generator(z_dim=512, c_dim=0, w_dim=512, img_resolution=param_dict['img_size'], img_channels=im_channel) #Generator
             z = torch.randn(param_dict['batch_size'], 512).cuda()
+            c = torch.zeros([param_dict['batch_size'], 0]).cuda()
         if param_dict['inp_model'] == "DFV2":
             G = DFV2_Generator(cnum_in=im_channel+2, cnum_out=im_channel, cnum=48, return_flow=False)
         
@@ -592,6 +596,8 @@ def test(testloader, model, epoch):
 
                     # complete image
                     outputs = visible * (1.-mask) + x_stage2 * mask
+                else: #mask2Former
+                    outputs, add_out = model(images, occ.float())
 
                 
                 
@@ -978,14 +984,14 @@ if __name__ == '__main__':
     gx = torch.cuda.device_count()
     print('useful gpu count is {}'.format(gx))
 
-    mask2Former = False
+    mask2Former = True
 
-    model_path = os.path.join(param_dict['model_dir'], '360valiou_best.pth')#'valiou_best.pth')#0valiou_best.pth')2201
+    model_path = os.path.join(param_dict['model_dir'], '180valiou_best.pth')#'valiou_best.pth')#0valiou_best.pth')2201
     
     composed_transforms_val = standard_transforms.Compose([
         tr.FixedResize(param_dict['img_size']),
         tr.Normalize(mean=param_dict['mean'], std=param_dict['std']),
-        tr.ToTensor()])  # data pocessing and data augumentation
+        tr.ToTensor(do_not = {'img_sf', 'occ_sf'})])  # data pocessing and data augumentation
 
     # Transformations for Occlusion training with Segoformer
     sf_transform = aug.Compose([
