@@ -139,11 +139,11 @@ class CoarseGenerator(nn.Module):
     def __init__(self, cnum_in, cnum_out, cnum):
         super().__init__()
         
-        self.conv1 = GConv(cnum_in, cnum//2, ksize=5, stride=1, padding=2)
+        self.conv1 = GConv(cnum_in, cnum//2, ksize=5, stride=1, padding=2) # 3->24
 
         # downsampling
-        self.down_block1 = GDownsamplingBlock(cnum//2, cnum)
-        self.down_block2 = GDownsamplingBlock(cnum, 2*cnum)
+        self.down_block1 = GDownsamplingBlock(cnum//2, cnum) # 24-> 48
+        self.down_block2 = GDownsamplingBlock(cnum, 2*cnum) # 48 -> 96
 
         # bottleneck
         self.conv_bn1 = GConv(2*cnum, 2*cnum, ksize=3, stride=1)
@@ -155,44 +155,49 @@ class CoarseGenerator(nn.Module):
         self.conv_bn7 = GConv(2*cnum, 2*cnum, ksize=3, stride=1)
 
         # upsampling
-        self.up_block1 = GUpsamplingBlock(2*cnum, cnum)
-        self.up_block2 = GUpsamplingBlock(cnum, cnum//4, cnum_hidden=cnum//2)
+        self.up_block1 = GUpsamplingBlock(2*cnum, cnum) # 96 -> 48
+        self.up_block2 = GUpsamplingBlock(2*cnum, cnum//2)#//4, cnum_hidden=cnum//2) # 48 -> 24
+        # originally self.up_block2 = GUpsamplingBlock(cnum, cnum//4, cnum_hidden=cnum//2) # 48 -> 12
 
         # to RGB
-        self.conv_to_rgb = GConv(cnum//4, cnum_out, ksize=3, stride=1, 
-                                 activation=None, gated=False)
+        self.conv_to_rgb = GConv(2*(cnum//2), cnum_out, ksize=3, stride=1,activation=None, gated=False)
+        # originally self.conv_to_rgb = GConv(cnum//4, cnum_out, ksize=3, stride=1,activation=None, gated=False)
         self.tanh = nn.Tanh()
 
     def forward(self, inpu):
-        x= inpu
+        x= inpu #[1, 3, 512, 512]
         
+        xin = self.conv1(x) #[1, 24, 512, 512]
         
-        x = self.conv1(x)
-        
-        
-
         # downsampling
-        x = self.down_block1(x)
-        x = self.down_block2(x)
+        xd1 = self.down_block1(xin) #([1, 48, 256, 256]
+        xd2 = self.down_block2(xd1) #[1, 96, 128, 128]
         
-
         # bottleneck
-        x = self.conv_bn1(x)
+        x = self.conv_bn1(xd2) #[1, 96, 128, 128]
         x = self.conv_bn2(x)
         x = self.conv_bn3(x)
         x = self.conv_bn4(x)
         x = self.conv_bn5(x)
         x = self.conv_bn6(x)
-        x = self.conv_bn7(x)
+        x = self.conv_bn7(x) #[1, 96, 128, 128]
+        
         
         # upsampling
-        x = self.up_block1(x)
-        x = self.up_block2(x)
+        xu1 = self.up_block1(x) #[1, 48, 256, 256]
+        xi = torch.cat((xu1,xd1),dim=1)
+        xu2 = self.up_block2(xi) #[1, 12, 512, 512]
+
+        xi2 = torch.cat((xu2,xin),dim=1)
+
+        
         
 
         # to RGB
-        x = self.conv_to_rgb(x)
+        x = self.conv_to_rgb(xi2) #[1, 1, 512, 512]
         x = self.tanh(x)
+        
+        
        
         
         return x
@@ -254,6 +259,7 @@ class FineGenerator(nn.Module):
         self.conv_to_rgb = GConv(cnum//4, cnum_out, ksize=3, stride=1, 
                                  activation=None, gated=False)
         self.tanh = nn.Tanh()
+       
 
     def forward(self, x, mask):
         xnow = x
@@ -310,12 +316,16 @@ class Generator(nn.Module):
     `Free-Form Image Inpainting with Gated Convolution, Yu et. al`.
     """
 
-    def __init__(self, cnum_in=5, cnum_out=3, cnum=48, 
+    def __init__(self, cnum_in=5, cnum_mid = 3, cnum_out=3, cnum=48, 
                  return_flow=False, checkpoint=None):
         super().__init__()
 
-        self.stage1 = CoarseGenerator(cnum_in, cnum_out, cnum)
-        self.stage2 = FineGenerator(cnum_out, cnum_out, cnum, return_flow)
+        #self.stage1 = CoarseGenerator(cnum_in, cnum_out, cnum)
+        #self.stage2 = FineGenerator(cnum_out, cnum_out, cnum, return_flow)
+        #Test: RGB -> RGB -> Bin mask:
+        self.stage1 = CoarseGenerator(cnum_in, cnum_mid, cnum)
+        self.stage2 = FineGenerator(cnum_mid, cnum_out, cnum, return_flow)
+
         self.return_flow = return_flow
         self.cnum_in = cnum_in
 
@@ -331,15 +341,24 @@ class Generator(nn.Module):
             x (Tensor): input of shape [batch, cnum_in, H, W]
             mask (Tensor): mask of shape [batch, 1, H, W]
         """
+        
         xin = x
         # get coarse result
 
         x_stage1 = self.stage1(x)
         
+        
         # inpaint input with coarse result
+        
+        # If the input is visible mask...
         x = x_stage1*mask + xin[:, :self.cnum_in-2]*(1.-mask)
+
+        # If the input is RGB image...
+        #x = x_stage1
+
         # get refined result
         x_stage2, offset_flow = self.stage2(x, mask)
+        
         
 
         if self.return_flow:
