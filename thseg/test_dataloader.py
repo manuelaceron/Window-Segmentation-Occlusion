@@ -375,7 +375,7 @@ def test(testloader, model, epoch):
             im_channel_mid = 1
             im_channel_out = 1
             #G = DFV2_Generator(cnum_in=im_channel+2, cnum_out=im_channel, cnum=48, return_flow=False)
-            G = DFV2_Generator(cnum_in=im_channel+2, cnum_mid = im_channel_mid, cnum_out=im_channel_out, cnum=96, return_flow=False)
+            G = DFV2_Generator(cnum_in=im_channel+2, cnum_mid = im_channel_mid, cnum_out=im_channel_out, cnum=48, return_flow=False)
         
         model = torch.nn.DataParallel(G, device_ids=[0])
         model.load_state_dict(state_dict)

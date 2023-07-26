@@ -369,7 +369,7 @@ def main():
             im_channel_mid = 1
             im_channel_out = 1 
 
-            cnum= 96 #256#48
+            cnum= 48 #256#48
             G = DFV2_Generator(cnum_in=im_channel+2, cnum_mid = im_channel_mid, cnum_out=im_channel_out, cnum=cnum, return_flow=False) 
             # Originally
             #G = DFV2_Generator(cnum_in=im_channel+2, cnum_out=im_channel_out, cnum=48, return_flow=False)
