@@ -94,22 +94,7 @@ class AmodalSegmentation(Dataset):
         
         
         
-        _img, _target, img_path, gt_path, _occ, occ_path, _hidden, hidden_path, _visible, visible_path , ann_json= self._make_img_gt_point_pair(index) 
-        sample = {'image': _img, 'gt': _target, 'img_sf': _img, 'occ': _occ, 'visible_mask': _visible, 'hidden_mask': _hidden}
-        
-        
-        if self.transform is not None:
-            sample = self.transform(sample)
-
-            
-        
-        
-        sample['img_path'] = img_path
-        sample['gt_path'] = gt_path
-        sample['occ_path'] = occ_path
-        sample['visible_path'] = visible_path
-        sample['hidden_path'] = hidden_path
-        
+        _img, _target, img_path, gt_path, _occ, occ_path, _hidden, hidden_path, _visible, visible_path = self._make_img_gt_point_pair(index) 
         
         
         #annotation: image_id (image), id (object id)
@@ -123,14 +108,40 @@ class AmodalSegmentation(Dataset):
             'images': [item for item in self.coco['images'] if img_name in item['file_name']]}
 
         
-        ann_info.update(resize_annotation(ann_info, (ann_info['images'][0]['height'],ann_info['images'][0]['width']), (_img.shape[0], _img.shape[1]) ) )
+        #ann_info.update(resize_annotation(ann_info, (ann_info['images'][0]['height'],ann_info['images'][0]['width']), (_img.shape[0], _img.shape[1]) ) )
+        grid = draw_boundaries(ann_info)
+
+        #cv2.imshow('Grid Overlay', ((_visible+grid)*255).astype(float))
+    
+        #cv2.waitKey(0)
+        #cv2.destroyAllWindows()
+        #pdb.set_trace()
+
         encoding = self.processor(images=_img, annotations=ann_info, masks_path=self.ann_folder, return_tensors="pt")
+        
         pixel_values = encoding["pixel_values"].squeeze() # remove batch dimension
         pro_target = encoding["labels"][0]
+        #ins_tg = generate_instance_masks(pro_target)
+        #ins_tg = np.transpose(ins_tg, (1,2,0))
         
-        #sample['ann'] = ann_info
+        
+
+        sample = {'image': _img, 'gt': _target, 'img_sf': _img, 'occ': _occ, 'occ_sf': _occ, 'visible_mask': _visible, 'hidden_mask': _hidden, 'grid': grid}
+        
+        
+        if self.transform is not None:
+            sample = self.transform(sample)
+        
+        
+        sample['img_path'] = img_path
+        sample['gt_path'] = gt_path
+        sample['occ_path'] = occ_path
+        sample['visible_path'] = visible_path
+        sample['hidden_path'] = hidden_path
         sample['pixel_values'] = pixel_values
         sample['pro_target'] = pro_target
+
+        
 
         #TODO: Instead of pixel_values (1 to all real pixels, I need pixel values from occlusion mask, )
         
@@ -158,7 +169,7 @@ class AmodalSegmentation(Dataset):
                 sample['df_fimage'] = encoded_inputs
             else:
                 
-                encoded_inputs = self.feature_extractor(sample['img_sf'], sample['occ'], return_tensors="pt")
+                encoded_inputs = self.feature_extractor(sample['img_sf'], sample['occ_sf'], return_tensors="pt")
                 for k,v in encoded_inputs.items():
                     encoded_inputs[k].squeeze_() # remove batch dimension
                 
@@ -192,19 +203,19 @@ class AmodalSegmentation(Dataset):
         _visible = utils.read_image(os.path.join(visible_path), 'am').astype(np.int32)
 
 
-        json_name=img_path.split('/')[-1].split('.')[0]+'.json'
-        mode = img_path.split('/')[-3]
-        json_root = "/home/cero_ma/MCV/window_benchmarks/originals/split-json-rectified/coco/ecp/"
-        json_path = os.path.join(json_root,mode,json_name)
+        #json_name=img_path.split('/')[-1].split('.')[0]+'.json'
+        #mode = img_path.split('/')[-3]
+        #json_root = "/home/cero_ma/MCV/window_benchmarks/originals/split-json-rectified/coco/ecp/"
+        #json_path = os.path.join(json_root,mode,json_name)
         
-        with open(json_path, 'r') as f:
-            ann_json = json.load(f)
+        #with open(json_path, 'r') as f:
+        #    ann_json = json.load(f)
         
         #ann_json = extract_json_info(ann_json)
         
         
         
-        return _img, _target, img_path, gt_path, _occ, occ_path, _hidden, hidden_path, _visible, visible_path, ann_json
+        return _img, _target, img_path, gt_path, _occ, occ_path, _hidden, hidden_path, _visible, visible_path#, ann_json
 
 class InferenceSegmentation(Dataset):
     """
@@ -323,3 +334,62 @@ def resize_annotation(annotation, orig_size, target_size):
     
              
     return annotation           
+
+def generate_instance_masks(ann_data):
+
+    ann = ann_info['annotations']
+    num_boxes= len(ann)
+    image_size = (num_boxes,512,512)
+    
+    H = ann_info['images'][0]['height']
+    W = ann_info['images'][0]['width']
+
+    
+    num_boxes= len(ann)
+    ins_mask = np.zeros((num_boxes,H,W))
+
+    for i in range(num_boxes):
+        x, y, width, height = ann[i]
+
+        x1, y1 = int(x), int(y)
+        x2, y2 = int(x + width), int(y + height)
+
+        ins_mask[i, y1:y2, x1:x2] = 1.0
+         
+    re_ins_mask = cv2.resize(ins_mask, image_size, interpolation=cv2.INTER_NEAREST)
+
+    return ins_mask
+
+def draw_boundaries(ann_info):
+    
+    
+    ann = ann_info['annotations']
+    num_boxes= len(ann)
+    image_size = (512,512)
+    
+    H = ann_info['images'][0]['height']
+    W = ann_info['images'][0]['width']
+
+    grid = np.zeros((H,W))
+    grid_color = 1
+
+    for i in range(num_boxes):
+        x, y, width, height = ann[i]['bbox']
+        x=int(x)
+        y = int(y)
+        width = int(width)
+        height = int(height)
+        try:
+            cv2.line(grid, (x, 0), (x,H), grid_color, 1)
+            cv2.line(grid, (x+width, 0), (x+width,H), grid_color, 1)
+            cv2.line(grid, (0, y), (W,y), grid_color, 1)
+            cv2.line(grid, (0, y+height), (W,y+height), grid_color, 1)
+        except:
+            pdb.set_trace()
+    
+    re_grid = cv2.resize(grid, image_size, interpolation=cv2.INTER_NEAREST)
+    
+    
+    
+    return re_grid
+    

@@ -18,7 +18,7 @@ import torch.optim as optim
 from tensorboardX import SummaryWriter
 from networks.get_model import get_net
 from tools.losses import get_loss, get_weights
-from tools.detrLoss import DetrHungarianMatcher, DetrLoss
+from tools.detrLoss import DetrHungarianMatcher, DetrLoss, Mask2FormerHungarianMatcher, M2FLoss
 from tools.parse_config_yaml import parse_yaml
 import torch.onnx
 import pdb
@@ -139,7 +139,7 @@ def collate_fn(batch):
     
     
     #encoding = processor(images=images, annotations=ann_info, masks_path=ann_folder, return_tensors="pt")
-
+    
     n_batch["image"] = inputs[0]
     n_batch["gt"] = inputs[1]
     n_batch["img_sf"] = inputs[2]
@@ -147,18 +147,21 @@ def collate_fn(batch):
     n_batch["occ_sf"] = inputs[4]
     n_batch["visible_mask"] = inputs[5]
     n_batch["hidden_mask"] = inputs[6]
-    n_batch["img_path"] = inputs[7]
-    n_batch["gt_path"] = inputs[8]
-    n_batch["occ_path"] = inputs[9]
-    n_batch["visible_path"] = inputs[10]
-    n_batch["hidden_path"] = inputs[11]
+    #n_batch["ins_gt"] = inputs[7]
+    n_batch["grid"] = inputs[7]
+
+    n_batch["img_path"] = inputs[8]
+    n_batch["gt_path"] = inputs[9]
+    n_batch["occ_path"] = inputs[10]
+    n_batch["visible_path"] = inputs[11]
+    n_batch["hidden_path"] = inputs[12]
     
-    n_batch["pixel_values"] = inputs[12]
-    n_batch["pro_target"] = inputs[13]
+    n_batch["pixel_values"] = inputs[13]
+    n_batch["pro_target"] = inputs[14]
     
     if param_dict['use-fixed-model']: 
-        n_batch['df_fimage'] = inputs[14]
-        n_batch['df_fooc'] = inputs[15]
+        n_batch['df_fimage'] = inputs[15]
+        n_batch['df_fooc'] = inputs[16]
 
     
 
@@ -344,9 +347,11 @@ def main():
         visi_model.cuda()
     
     if param_dict['adversarial']:
-        im_channel = 1
+        
+        
         # MAT
         if param_dict['inp_model'] == "MAT":
+            im_channel = 1
             G = Generator(z_dim=512, c_dim=0, w_dim=512, img_resolution=param_dict['img_size'], img_channels=im_channel) #
             #D = Discriminator(c_dim=0, img_resolution=param_dict['img_size'], img_channels=im_channel)
             z = torch.randn(param_dict['batch_size'], 512).cuda()
@@ -359,7 +364,15 @@ def main():
 
         # DeepFillV2
         if param_dict['inp_model'] == "DFV2":
-            G = DFV2_Generator(cnum_in=im_channel+2, cnum_out=im_channel, cnum=48, return_flow=False)
+            
+            im_channel = 1
+            im_channel_mid = 1
+            im_channel_out = 1 
+
+            cnum= 96 #256#48
+            G = DFV2_Generator(cnum_in=im_channel+2, cnum_mid = im_channel_mid, cnum_out=im_channel_out, cnum=cnum, return_flow=False) 
+            # Originally
+            #G = DFV2_Generator(cnum_in=im_channel+2, cnum_out=im_channel_out, cnum=48, return_flow=False)
             #D = DFV2_Discriminator(cnum_in=im_channel+1, cnum=64)
             D = NLayerDiscriminator(input_nc=im_channel+1)
             gan_loss_d, gan_loss_g = gan_losses.hinge_loss_d, gan_losses.hinge_loss_g
@@ -399,7 +412,14 @@ def main():
                 num_classes=param_dict['num_class'],
                 eos_coef=0.1,
             )
+     
     criterionDetr.cuda()
+    #criterionM2F = M2FLoss(
+    #        num_points = 512*512,
+    #        matcher = Mask2FormerHungarianMatcher(cost_class=1.0, cost_dice=1.0, cost_mask=1.0, num_points=512*512,)
+    #        ) 
+    #criterionM2F.cuda()
+
     if param_dict['adversarial']:
         # loss
         adv_loss = AdversarialLoss('nsgan').cuda()
@@ -478,12 +498,22 @@ def main():
                     labels = torch.stack(data["gt"], dim=0)
                     
                     pro_target = data["pro_target"]
+                    #ins_gt = data['ins_gt']
+
                     
                     for v in pro_target:                        
                         v["boxes"] = v["boxes"].cuda() 
                     
                     for v in pro_target:                        
                         v["class_labels"] = v["class_labels"].cuda() 
+                    
+                    
+                    
+                        
+                       
+                      
+                        
+                    
                     
                 
                 path = data['img_path']
@@ -603,6 +633,9 @@ def main():
                         # Discriminator Fake Loss
                     
                         img, img_stg1 = G(visible, mask, z, None, return_stg1=True)
+
+                        
+
                                             
                         dis_input_fake = img.detach()
                         dis_input_fake_stg1 = img_stg1.detach()
@@ -622,7 +655,7 @@ def main():
                         gen_input_fake_stg1 = img_stg1
                         gen_fake = D(torch.cat([visible, gen_input_fake],1))
                         gen_fake_stg1 = D(torch.cat([visible, gen_input_fake_stg1],1))
-                        # The mean is just a test, all the implementations so far dont use mean...
+                        # The mean is just a test, it seems it worked...
                         gen_gan_loss = adv_loss(gen_fake, True, False) + adv_loss(gen_fake_stg1, True, False)+ L1_loss(gen_input_fake, labels) + criterion(gen_input_fake, torch.squeeze(labels,1)) + criterion(gen_input_fake_stg1, torch.squeeze(labels,1))
                         gen_loss += gen_gan_loss.mean()
 
@@ -637,7 +670,9 @@ def main():
 
                     elif param_dict['inp_model'] == "DFV2":
                         
-                        batch_real = visible
+                        # Input: RGB or visible mask
+                        #visible = images
+                        batch_real = visible #torch.cat((images,visible), dim=1)#images
                         
                         occ_mask = occ.float()
                         mask_2 = additional_mask()
@@ -645,57 +680,139 @@ def main():
                         
                         #cv2.imshow('mask_2', (np.asarray(mask_2[0][0].detach().cpu())*255).astype(float))
                         #cv2.imshow('new_mask', (np.asarray(new_mask[0][0].detach().cpu())*255).astype(float))
-                           
+
                         #cv2.waitKey(0)
                         #cv2.destroyAllWindows()
                         
-                        
+                        original = True
+                        if original:
+                            grid = torch.stack(data["grid"], dim=0)
+                            
 
-                        batch_incomplete = batch_real*(1.-mask)
-                        ones_x = torch.ones_like(batch_incomplete)[:, 0:1].cuda()
-                        x = torch.cat([batch_incomplete, ones_x, ones_x*mask], axis=1)
+                            batch_incomplete = batch_real*(1.-mask)
+                            ones_x = torch.ones_like(batch_incomplete)[:, 0:1].cuda()
+                            #ones_x = grid.cuda()
+                            x = torch.cat([batch_incomplete, ones_x, ones_x*mask], axis=1)
+                            #if mask.max()==1:
+                                
+                            #    cv2.imshow('1', (np.asarray(batch_incomplete[0][0].detach().cpu())*255).astype(float))
+                            #    cv2.imshow('2', (np.asarray(ones_x[0][0].detach().cpu())*255).astype(float))
+                            #    cv2.imshow('3', (np.asarray((ones_x*mask)[0][0].detach().cpu())*255).astype(float))
+                            #    cv2.imshow('4', (np.asarray((mask)[0][0].detach().cpu())*255).astype(float))
 
-                        labels = torch.unsqueeze(labels,1).float()
-                        
-                        dis_real = D(torch.cat([visible, labels],1)) 
-                        dis_real_loss = adv_loss(dis_real, True, True)  
-                        
-                        # Generator coarse and fine stages
-                        
-                        #x1, x2 = G(x, mask)
-                        img_stg1, img = G(x, mask)
+                            #    cv2.waitKey(0)
+                            #    cv2.destroyAllWindows()
+                            #    pdb.set_trace()
 
-                        ##############################
+                            labels = torch.unsqueeze(labels,1).float()
+                            
+                            dis_real = D(torch.cat([batch_real, labels],1)) #visible
+                            dis_real_loss = adv_loss(dis_real, True, True)  
+                            
+                            # Generator coarse and fine stages
+                            
+                            #x1, x2 = G(x, mask)
+                            img_stg1, img = G(x, mask)
 
-                        dis_input_fake = img.detach()
-                        dis_input_fake_stg1 = img_stg1.detach()
+                            ##############################
 
-                        dis_fake = D(torch.cat([visible, dis_input_fake],1))
-                        dis_fake_stg1 = D(torch.cat([visible, dis_input_fake_stg1],1))
+                            dis_input_fake = img.detach()
+                            dis_input_fake_stg1 = img_stg1.detach()
 
-                        dis_fake_loss = adv_loss(dis_fake, False, True)
-                        dis_fake_loss_stg1 = adv_loss(dis_fake_stg1, False, True)
+                            dis_fake = D(torch.cat([batch_real, dis_input_fake],1)) #visible
+                            dis_fake_stg1 = D(torch.cat([batch_real, dis_input_fake_stg1],1)) #visible
 
-                        dis_loss = (dis_real_loss + dis_fake_loss + dis_fake_loss_stg1).mean()
+                            dis_fake_loss = adv_loss(dis_fake, False, True)
+                            dis_fake_loss_stg1 = adv_loss(dis_fake_stg1, False, True)
+                            dis_loss = (dis_real_loss + dis_fake_loss + dis_fake_loss_stg1).mean()
 
-                        # Train Generator
-                        gen_loss = 0
-                                            
-                        gen_input_fake = img
-                        gen_input_fake_stg1 = img_stg1
-                        gen_fake = D(torch.cat([visible, gen_input_fake],1))
-                        gen_fake_stg1 = D(torch.cat([visible, gen_input_fake_stg1],1))
-                        gen_gan_loss = adv_loss(gen_fake, True, False) + adv_loss(gen_fake_stg1, True, False)+ L1_loss(gen_input_fake, labels) + criterion(gen_input_fake, torch.squeeze(labels,1)) + criterion(gen_input_fake_stg1, torch.squeeze(labels,1))
-                        gen_loss += gen_gan_loss 
+                            # Train Generator
+                            gen_loss = 0                                                
+                            gen_input_fake = img
+                            gen_input_fake_stg1 = img_stg1
+                            gen_fake = D(torch.cat([batch_real, gen_input_fake],1)) #visible
+                            gen_fake_stg1 = D(torch.cat([batch_real, gen_input_fake_stg1],1)) #visible
+                            gen_gan_loss = adv_loss(gen_fake, True, False) + adv_loss(gen_fake_stg1, True, False)+ L1_loss(gen_input_fake, labels) + criterion(gen_input_fake, torch.squeeze(labels,1)) + criterion(gen_input_fake_stg1, torch.squeeze(labels,1))                        
+                            gen_loss += gen_gan_loss.mean()
+                            
+                            # update                        
+                            gen_loss.backward()  
 
-                        # update
-                    
-                        gen_loss.backward()        
-                        optimizerG.step()
-                        running_loss += gen_loss
-                        
-                        dis_loss.backward()
-                        optimizerD.step()
+                            optimizerG.step()
+                            running_loss += gen_loss
+                            
+                            dis_loss.backward()
+                            optimizerD.step()
+
+                        else: #Instance segmentation
+
+                            
+                            batch_incomplete = batch_real*(1.-mask)
+                            ones_x = torch.ones_like(batch_incomplete)[:, 0:1].cuda()
+                            x = torch.cat([batch_incomplete, ones_x, ones_x*mask], axis=1)
+                            
+                            labels = torch.unsqueeze(labels,1).float()
+                            #cv2.imshow('2', (np.asarray(labels_2[0].detach().cpu())*255).astype(float))
+                            
+                            #cv2.waitKey(0)
+                            #cv2.destroyAllWindows()
+                            
+                            
+                            dis_real = D(torch.cat([batch_real, labels],1)) #visible
+                            dis_real_loss = adv_loss(dis_real, True, True)  
+                            
+                            
+                            # Generator coarse and fine stages
+                            
+                            #x1, x2 = G(x, mask)
+                            img_stg1, img = G(x, mask)
+                            
+                            
+
+                            ##############################
+
+                            dis_input_fake = torch.sum(img.detach(), dim=1)
+                            dis_input_fake = torch.unsqueeze(dis_input_fake,1)
+
+                            dis_input_fake_stg1 = torch.sum(img_stg1.detach(), dim=1)
+                            dis_input_fake_stg1 = torch.unsqueeze(dis_input_fake_stg1,1)
+                            
+                            
+                            dis_fake = D(torch.cat([batch_real, dis_input_fake],1)) #visible
+                            dis_fake_stg1 = D(torch.cat([batch_real, dis_input_fake_stg1],1)) #visible
+
+                            dis_fake_loss = adv_loss(dis_fake, False, True)
+                            dis_fake_loss_stg1 = adv_loss(dis_fake_stg1, False, True)
+                            dis_loss = (dis_real_loss + dis_fake_loss + dis_fake_loss_stg1).mean()
+                            
+
+                            # Train Generator
+                            gen_loss = 0                                                
+                            gen_input_fake = torch.sum(img, dim=1)
+                            gen_input_fake = torch.unsqueeze(gen_input_fake,1)
+
+                            gen_input_fake_stg1 = torch.sum(img_stg1, dim=1)
+                            gen_input_fake_stg1 = torch.unsqueeze(gen_input_fake_stg1,1)
+
+                            gen_fake = D(torch.cat([batch_real, gen_input_fake],1)) #visible
+                            gen_fake_stg1 = D(torch.cat([batch_real, gen_input_fake_stg1],1)) #visible
+
+                            l_mask, l_dice = criterionM2F(img, ins_gt) 
+                            l_mask_stg1, l_dice_stg1 = criterionM2F(img_stg1, ins_gt)
+                            
+                            gen_gan_loss = adv_loss(gen_fake, True, False) + adv_loss(gen_fake_stg1, True, False) + L1_loss(gen_input_fake, labels) + \
+                                            l_mask + l_dice + l_mask_stg1 + l_dice_stg1
+                            gen_loss += gen_gan_loss.mean()
+                            
+                            # update                        
+                            gen_loss.backward()  
+
+                            optimizerG.step()
+                            running_loss += gen_loss
+                            
+                            dis_loss.backward()
+                            optimizerD.step()
+                             
 
                         ###################################
                         #batch_predicted = x2 
@@ -1133,16 +1250,28 @@ def eval(valloader, model, model2, model3, criterion, criterion2, criterion3, ep
                     vallosses = mask_losses
 
                 elif param_dict['inp_model'] == "DFV2":
+                    # Input RGB or Visible
+                    real_batch = visible #torch.cat((images,visible), dim=1)#images
+
                     mask = occ.float()   
-                    image_masked = visible * (1.-mask)  # mask image
+                    image_masked = real_batch * (1.-mask)  # mask image
 
                     ones_x = torch.ones_like(image_masked)[:, 0:1, :, :]
                     x = torch.cat([image_masked, ones_x, ones_x*mask],dim=1)  # concatenate channels
 
                     _, x_stage2 = model(x, mask)
 
+                    # For instance segm...
+                    x_stage2 = torch.sum(x_stage2, dim=1)
+                    x_stage2 = torch.unsqueeze(x_stage2,1)
+
                     # complete image
-                    outputs = visible * (1.-mask) + x_stage2 * mask
+
+                    # If the input is visible mask...
+                    outputs = real_batch * (1.-mask) + x_stage2 * mask
+
+                    # If the input is RGB image...
+                    #outputs = x_stage2
                     
                     mask_losses = criterion(outputs,labels)
                     vallosses = mask_losses

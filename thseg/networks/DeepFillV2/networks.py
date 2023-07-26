@@ -41,7 +41,7 @@ class GConv(nn.Module):
     def __init__(self, cnum_in, cnum_out,
                  ksize, stride=1, padding='auto', rate=1,
                  activation=nn.ELU(),
-                 bias=True, gated=True):
+                 bias=True, gated=True, use_conv1D=False):
         super().__init__()
 
         padding = rate*(ksize-1)//2 if padding == 'auto' else padding
@@ -49,21 +49,31 @@ class GConv(nn.Module):
         self.cnum_out = cnum_out
         # num_conv_out = cnum_out if self.cnum_out == 3 or self.activation is None else 2*cnum_out
         num_conv_out = 2*cnum_out if gated else cnum_out
-        self.conv = nn.Conv2d(cnum_in,
-                              num_conv_out,
-                              kernel_size=ksize,
-                              stride=stride,
-                              padding=padding,
-                              dilation=rate,
-                              bias=bias)
 
-        _init_conv_layer(self.conv, activation=self.activation)
+        if use_conv1D:
+            self.conv1D = strip_conv(cnum_in,
+                                    num_conv_out,
+                                    ksize=ksize,
+                                    stride=stride,
+                                    rate=rate)
+        else:
+            self.conv = nn.Conv2d(cnum_in,
+                                num_conv_out,
+                                kernel_size=ksize,
+                                stride=stride,
+                                padding=padding,
+                                dilation=rate,
+                                bias=bias)
+
+            _init_conv_layer(self.conv, activation=self.activation)
+            
 
         self.ksize = ksize
         self.stride = stride
         self.rate = rate
         self.padding = padding
         self.gated = gated
+        self.use_conv1D = use_conv1D
 
     def forward(self, x):
         """
@@ -72,7 +82,10 @@ class GConv(nn.Module):
         """
         if not self.gated: return self.conv(x)
 
-        x = self.conv(x)        
+        if self.use_conv1D:
+            x = self.conv1D(x)
+        else:
+            x = self.conv(x)        
         x, y = torch.split(x, self.cnum_out, dim=1)
         x = self.activation(x)
         y = torch.sigmoid(y)
@@ -139,66 +152,75 @@ class CoarseGenerator(nn.Module):
     def __init__(self, cnum_in, cnum_out, cnum):
         super().__init__()
         
-        self.conv1 = GConv(cnum_in, cnum//2, ksize=5, stride=1, padding=2) # 3->24
+        self.conv1 = GConv(cnum_in, cnum//2, ksize=5, stride=1, padding=2)
 
         # downsampling
-        self.down_block1 = GDownsamplingBlock(cnum//2, cnum) # 24-> 48
-        self.down_block2 = GDownsamplingBlock(cnum, 2*cnum) # 48 -> 96
+        self.down_block1 = GDownsamplingBlock(cnum//2, cnum)
+        self.down_block2 = GDownsamplingBlock(cnum, 2*cnum)
 
         # bottleneck
         self.conv_bn1 = GConv(2*cnum, 2*cnum, ksize=3, stride=1)
-        self.conv_bn2 = GConv(2*cnum, 2*cnum, ksize=3, rate=2, padding=2)
-        self.conv_bn3 = GConv(2*cnum, 2*cnum, ksize=3, rate=4, padding=4)
-        self.conv_bn4 = GConv(2*cnum, 2*cnum, ksize=3, rate=8, padding=8)
-        self.conv_bn5 = GConv(2*cnum, 2*cnum, ksize=3, rate=16, padding=16)
+
+        use_conv1D = True
+        if use_conv1D:
+            # Test using 1D convolutions
+            k = 7
+            self.conv_bn2 = GConv(2*cnum, 2*cnum, ksize=k, rate=2, use_conv1D=use_conv1D)
+            self.conv_bn3 = GConv(2*cnum, 2*cnum, ksize=k, rate=4, use_conv1D=use_conv1D)
+            self.conv_bn4 = GConv(2*cnum, 2*cnum, ksize=k, rate=8, use_conv1D=use_conv1D)
+            self.conv_bn5 = GConv(2*cnum, 2*cnum, ksize=k, rate=16, use_conv1D=use_conv1D)
+        else:
+            self.conv_bn2 = GConv(2*cnum, 2*cnum, ksize=3, rate=2, padding=2)
+            self.conv_bn3 = GConv(2*cnum, 2*cnum, ksize=3, rate=4, padding=4)
+            self.conv_bn4 = GConv(2*cnum, 2*cnum, ksize=3, rate=8, padding=8)
+            self.conv_bn5 = GConv(2*cnum, 2*cnum, ksize=3, rate=16, padding=16)
+
+
         self.conv_bn6 = GConv(2*cnum, 2*cnum, ksize=3, stride=1)
         self.conv_bn7 = GConv(2*cnum, 2*cnum, ksize=3, stride=1)
 
         # upsampling
-        self.up_block1 = GUpsamplingBlock(2*cnum, cnum) # 96 -> 48
-        self.up_block2 = GUpsamplingBlock(2*cnum, cnum//2)#//4, cnum_hidden=cnum//2) # 48 -> 24
-        # originally self.up_block2 = GUpsamplingBlock(cnum, cnum//4, cnum_hidden=cnum//2) # 48 -> 12
+        self.up_block1 = GUpsamplingBlock(2*cnum, cnum)
+        self.up_block2 = GUpsamplingBlock(cnum, cnum//4, cnum_hidden=cnum//2)
 
         # to RGB
-        self.conv_to_rgb = GConv(2*(cnum//2), cnum_out, ksize=3, stride=1,activation=None, gated=False)
-        # originally self.conv_to_rgb = GConv(cnum//4, cnum_out, ksize=3, stride=1,activation=None, gated=False)
+        self.conv_to_rgb = GConv(cnum//4, cnum_out, ksize=3, stride=1, activation=None, gated=False)
         self.tanh = nn.Tanh()
 
+
     def forward(self, inpu):
-        x= inpu #[1, 3, 512, 512]
+ 
+        x= inpu
         
-        xin = self.conv1(x) #[1, 24, 512, 512]
+        
+        x = self.conv1(x) #[1, 24, 512, 512]
         
         # downsampling
-        xd1 = self.down_block1(xin) #([1, 48, 256, 256]
-        xd2 = self.down_block2(xd1) #[1, 96, 128, 128]
+        x = self.down_block1(x) #([1, 48, 256, 256]
+        x = self.down_block2(x) #[1, 96, 128, 128]
         
+
         # bottleneck
-        x = self.conv_bn1(xd2) #[1, 96, 128, 128]
+        x = self.conv_bn1(x) #[1, 96, 128, 128]
+
         x = self.conv_bn2(x)
         x = self.conv_bn3(x)
         x = self.conv_bn4(x)
         x = self.conv_bn5(x)
         x = self.conv_bn6(x)
+
         x = self.conv_bn7(x) #[1, 96, 128, 128]
         
         
         # upsampling
-        xu1 = self.up_block1(x) #[1, 48, 256, 256]
-        xi = torch.cat((xu1,xd1),dim=1)
-        xu2 = self.up_block2(xi) #[1, 12, 512, 512]
-
-        xi2 = torch.cat((xu2,xin),dim=1)
-
-        
+        x = self.up_block1(x)
+        x = self.up_block2(x)
         
 
         # to RGB
-        x = self.conv_to_rgb(xi2) #[1, 1, 512, 512]
+        x = self.conv_to_rgb(x) #[1, 1, 512, 512]
         x = self.tanh(x)
-        
-        
-       
+
         
         return x
 
@@ -221,10 +243,20 @@ class FineGenerator(nn.Module):
 
         # bottleneck
         self.conv_conv_bn1 = GConv(2*cnum, 2*cnum, ksize=3, stride=1)
-        self.conv_conv_bn2 = GConv(2*cnum, 2*cnum, ksize=3, rate=2, padding=2)
-        self.conv_conv_bn3 = GConv(2*cnum, 2*cnum, ksize=3, rate=4, padding=4)
-        self.conv_conv_bn4 = GConv(2*cnum, 2*cnum, ksize=3, rate=8, padding=8)
-        self.conv_conv_bn5 = GConv(2*cnum, 2*cnum, ksize=3, rate=16, padding=16)
+        
+        use_conv1D = True
+
+        if use_conv1D:
+            k = 7
+            self.conv_conv_bn2 = GConv(2*cnum, 2*cnum, ksize=k, rate=2, use_conv1D= use_conv1D)
+            self.conv_conv_bn3 = GConv(2*cnum, 2*cnum, ksize=k, rate=4, use_conv1D= use_conv1D)
+            self.conv_conv_bn4 = GConv(2*cnum, 2*cnum, ksize=k, rate=8, use_conv1D= use_conv1D)
+            self.conv_conv_bn5 = GConv(2*cnum, 2*cnum, ksize=k, rate=16, use_conv1D= use_conv1D)
+        else:
+            self.conv_conv_bn2 = GConv(2*cnum, 2*cnum, ksize=3, rate=2, padding=2)
+            self.conv_conv_bn3 = GConv(2*cnum, 2*cnum, ksize=3, rate=4, padding=4)
+            self.conv_conv_bn4 = GConv(2*cnum, 2*cnum, ksize=3, rate=8, padding=8)
+            self.conv_conv_bn5 = GConv(2*cnum, 2*cnum, ksize=3, rate=16, padding=16)
 
         ### ATTENTION BRANCH (B2) ###
         self.ca_conv1 = GConv(cnum_in, cnum//2, 5, 1, padding=2)
@@ -262,7 +294,7 @@ class FineGenerator(nn.Module):
        
 
     def forward(self, x, mask):
-        xnow = x
+        xnow = x #[1, 1, 512, 512])
 
         ### CONV BRANCH ###
         x = self.conv_conv1(xnow)
@@ -276,7 +308,7 @@ class FineGenerator(nn.Module):
         x = self.conv_conv_bn3(x)
         x = self.conv_conv_bn4(x)
         x = self.conv_conv_bn5(x)
-        x_hallu = x
+        x_hallu = x #([1, 96, 128, 128])
 
         ### ATTENTION BRANCH ###
         x = self.ca_conv1(xnow)
@@ -289,10 +321,11 @@ class FineGenerator(nn.Module):
         x, offset_flow = self.contextual_attention(x, x, mask)
         x = self.ca_conv_bn4(x)
         x = self.ca_conv_bn5(x)
-        pm = x
+        pm = x #([1, 96, 128, 128])
 
         # concatenate outputs from both branches
-        x = torch.cat([x_hallu, pm], dim=1)
+        x = torch.cat([x_hallu, pm], dim=1) #([1, 192, 128, 128])
+        
 
         ### UNITED BRANCHES ###
         x = self.conv_bn6(x)
@@ -822,3 +855,28 @@ class Discriminator(nn.Module):
         return x
 
 # ----------------------------------------------------------------------------
+
+class strip_conv(nn.Module):
+    def __init__(self,in_c,out_c, ksize = 15, stride=1, padding='same',
+                 rate =1):
+        super(strip_conv,self).__init__()
+
+        
+        # Vertical -> horizontal convolution
+        self.leftStripConv = nn.Sequential(
+            nn.Conv2d(in_c, out_c, kernel_size = [1, ksize],  dilation = rate, padding=padding),
+            nn.Conv2d(out_c, out_c, kernel_size = [ksize, 1],  dilation = rate, padding=padding)
+        )
+
+        self.rightStripConv = nn.Sequential(
+            nn.Conv2d(in_c, out_c, kernel_size = [ksize, 1],  dilation = rate, padding=padding),
+            nn.Conv2d(out_c, out_c, kernel_size = [1, ksize],  dilation = rate, padding=padding)
+        )
+        
+    def forward(self,x):
+
+        l = self.leftStripConv(x)
+        r = self.rightStripConv(x)
+        
+
+        return l+r
