@@ -1,9 +1,42 @@
 import numpy as np
-import torch, pdb
+import torch, pdb, math, cv2, os
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
+from collections import OrderedDict
 # from torch.nn.utils.parametrizations import spectral_norm
+from ..new_frame.deep_window import Mask2FormerSinePositionEmbedding, attentionDecoder, Mask2FormerMaskPredictor
+import matplotlib.pyplot as plt
 
+
+def plot_features(inputF, layer):
+        
+    nothing = True
+    if nothing:
+        return
+    else:           
+
+        path = '/home/cero_ma/MCV/code220419_windows/0401_files/DFV2_ecp_0.0001_addMask/'   
+        if os.path.exists(os.path.join(path, 'features')) is False:
+            os.mkdir(os.path.join(path, 'features'))
+        
+        if os.path.exists(os.path.join(path, 'means')) is False:
+            os.mkdir(os.path.join(path, 'means'))
+        
+        gray_scale = torch.sum(inputF[0],0)
+        gray_scale = gray_scale / inputF.shape[0]
+        cv2.imwrite(os.path.join(path, 'means', layer+'.png'), (np.asarray(gray_scale.detach().cpu())*255).astype(float))
+
+        x = inputF.detach().cpu().numpy()
+        gr = int(math.ceil(math.sqrt(x.shape[1])))    
+
+        fig = plt.figure(figsize=(30, 50))
+        for i in range(x.shape[1]):
+            a = fig.add_subplot(gr, gr, i+1)
+            imgplot = plt.imshow(x[0][i], cmap='gray')
+            a.axis("off")        
+        
+        plt.savefig(os.path.join(path, 'features', layer+'.png'), bbox_inches='tight')
 # ----------------------------------------------------------------------------
 
 def _init_conv_layer(conv, activation, mode='fan_out'):
@@ -140,7 +173,7 @@ class GUpsamplingBlock(nn.Module):
 
     def forward(self, x):
         x = self.conv1_upsample(x)
-        x = self.conv2(x)
+        x = self.conv2(x)        
         return x
 
 # ----------------------------------------------------------------------------
@@ -194,33 +227,39 @@ class CoarseGenerator(nn.Module):
         
         
         x = self.conv1(x) #[1, 24, 512, 512]
+        plot_features(x, '1-conv1')
         
         # downsampling
         x = self.down_block1(x) #([1, 48, 256, 256]
-        x = self.down_block2(x) #[1, 96, 128, 128]
-        
+        plot_features(x, '2-down_block1')
 
+        x = self.down_block2(x) #[1, 96, 128, 128]
+        plot_features(x, '3-down_block2')
+         
         # bottleneck
         x = self.conv_bn1(x) #[1, 96, 128, 128]
-
         x = self.conv_bn2(x)
         x = self.conv_bn3(x)
+        plot_features(x, '4-conv_bn3')
         x = self.conv_bn4(x)
         x = self.conv_bn5(x)
         x = self.conv_bn6(x)
-
         x = self.conv_bn7(x) #[1, 96, 128, 128]
+        plot_features(x, '5-conv_bn7')
         
         
         # upsampling
         x = self.up_block1(x)
+        plot_features(x, '5-up_block1')
         x = self.up_block2(x)
-        
+        plot_features(x, '6-up_block2')
 
         # to RGB
         x = self.conv_to_rgb(x) #[1, 1, 512, 512]
+        plot_features(x, '7-conv_to_rgb')
         x = self.tanh(x)
-
+        plot_features(x, '8-tanh')
+        
         
         return x
 
@@ -245,6 +284,7 @@ class FineGenerator(nn.Module):
         self.conv_conv_bn1 = GConv(2*cnum, 2*cnum, ksize=3, stride=1)
         
         use_conv1D = True
+        self.transformer = False
 
         if use_conv1D:
             k = 7
@@ -287,10 +327,16 @@ class FineGenerator(nn.Module):
         self.up_block1 = GUpsamplingBlock(2*cnum, cnum)
         self.up_block2 = GUpsamplingBlock(cnum, cnum//4, cnum_hidden=cnum//2)
 
-        # to RGB
-        self.conv_to_rgb = GConv(cnum//4, cnum_out, ksize=3, stride=1, 
-                                 activation=None, gated=False)
-        self.tanh = nn.Tanh()
+        
+        if not self.transformer:
+            # to RGB
+            self.conv_to_rgb = GConv(cnum//4, cnum_out, ksize=3, stride=1, 
+                                    activation=None, gated=False)
+            self.tanh = nn.Tanh()
+            
+        else:
+            self.trans = TransformerModule(cnum=cnum)
+
        
 
     def forward(self, x, mask):
@@ -298,46 +344,80 @@ class FineGenerator(nn.Module):
 
         ### CONV BRANCH ###
         x = self.conv_conv1(xnow)
+        plot_features(x, '9-conv_conv1')
         # downsampling
-        x = self.conv_down_block1(x)
-        x = self.conv_down_block2(x)
+        x = self.conv_down_block1(x) #Can be useful as skip connection?
+        plot_features(x, '10-conv_down_block1')
+                
+        x = self.conv_down_block2(x) #Can be useful as skip connection?
+        plot_features(x, '11-conv_down_block2')
 
         # bottleneck
         x = self.conv_conv_bn1(x)
         x = self.conv_conv_bn2(x)
         x = self.conv_conv_bn3(x)
+        plot_features(x, '12-conv_conv_bn3')
         x = self.conv_conv_bn4(x)
         x = self.conv_conv_bn5(x)
         x_hallu = x #([1, 96, 128, 128])
+        plot_features(x, '13-conv_conv_bn5')
 
         ### ATTENTION BRANCH ###
         x = self.ca_conv1(xnow)
+        plot_features(x, '14-ca_conv1')
+
         # downsampling
         x = self.ca_down_block1(x)
         x = self.ca_down_block2(x)
+        plot_features(x, '15-ca_down_block2')
 
         # bottleneck
         x = self.ca_conv_bn1(x)
         x, offset_flow = self.contextual_attention(x, x, mask)
+        plot_features(x, '16-contextual_attention')
         x = self.ca_conv_bn4(x)
         x = self.ca_conv_bn5(x)
         pm = x #([1, 96, 128, 128])
 
+        plot_features(x, '17-ca_conv_bn5')
+
         # concatenate outputs from both branches
         x = torch.cat([x_hallu, pm], dim=1) #([1, 192, 128, 128])
+
+        plot_features(x, '18-concat')
         
 
         ### UNITED BRANCHES ###
-        x = self.conv_bn6(x)
-        x = self.conv_bn7(x)
+        
+        x = self.conv_bn6(x) #([1, 96, 128, 128])
+        plot_features(x, '19-conv_bn6')
+
+        x7 = self.conv_bn7(x) #([1, 96, 128, 128])
+        plot_features(x7, '20-conv_bn7')
 
         # upsampling
-        x = self.up_block1(x)
-        x = self.up_block2(x)
+        xu1 = self.up_block1(x7) #[1, 48, 256, 256])
+        plot_features(xu1, '21-up_block1')
 
-        # to RGB
-        x = self.conv_to_rgb(x)
-        x = self.tanh(x)
+        xu2 = self.up_block2(xu1) #[1, 12, 512, 512]) #this one makes arc-shape -> rectangular-shape
+        plot_features(xu2, '22-up_block2')
+
+        if not self.transformer:
+            # to RGB
+            x = self.conv_to_rgb(xu2)
+            plot_features(xu2, '23-conv_to_rgb')
+            x = self.tanh(x)
+            plot_features(xu2, '24-tanh')
+
+        else:   
+            # Test using TransformerQuery
+            x_feat =OrderedDict()
+            x_feat['l3'] = xu2
+            x_feat['l4'] = xu1
+            x_feat['l5'] = x7  
+            x =self.trans(x_feat)
+        
+        
         
         return x, offset_flow
 
@@ -374,20 +454,22 @@ class Generator(nn.Module):
             x (Tensor): input of shape [batch, cnum_in, H, W]
             mask (Tensor): mask of shape [batch, 1, H, W]
         """
+        do_stg1 = True
+        keep_orig_bg = True
         
-        xin = x
-        # get coarse result
-
-        x_stage1 = self.stage1(x)
+        if do_stg1:
+            # get coarse result
+            x_stage1 = self.stage1(x)
+        else:
+            x_stage1 = x
         
-        
-        # inpaint input with coarse result
-        
-        # If the input is visible mask...
-        x = x_stage1*mask + xin[:, :self.cnum_in-2]*(1.-mask)
-
-        # If the input is RGB image...
-        #x = x_stage1
+    
+        if keep_orig_bg:
+            input_channel = 1
+            add = x.shape[1] - input_channel
+            x = x_stage1*mask + x[:, :self.cnum_in-add]*(1.-mask) 
+        else:
+            x = x_stage1            
 
         # get refined result
         x_stage2, offset_flow = self.stage2(x, mask)
@@ -880,3 +962,174 @@ class strip_conv(nn.Module):
         
 
         return l+r
+
+# ----------------------------------------------------------------------------
+
+class DoubleConv(nn.Module):
+    """(convolution => [BN] => ReLU) * 2"""
+
+    def __init__(self, in_cannels, num_classannels):
+        super().__init__()
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_cannels, num_classannels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_classannels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(num_classannels, num_classannels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_classannels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+
+class Up(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_cannels, num_classannels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        else:
+            self.up = nn.ConvTranspose2d(in_cannels // 2, in_cannels // 2, kernel_size=2, stride=2)
+
+        self.conv = DoubleConv(in_cannels, num_classannels)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        # input is CHW
+        diffY = x2.size()[2] - x1.size()[2]
+        diffX = x2.size()[3] - x1.size()[3]
+
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
+                        diffY // 2, diffY - diffY // 2])
+        # if you have padding issues, see
+        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
+        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
+
+class OutConv(nn.Module):
+    def __init__(self, in_cannels, num_classannels):
+        super(OutConv, self).__init__()
+        self.conv = nn.Conv2d(in_cannels, num_classannels, kernel_size=1)
+
+    def forward(self, x):
+        return self.conv(x)
+
+class TransformerModule(nn.Module):
+
+    def __init__(self, cnum=48, num_class=4):
+        super().__init__()
+        
+        self.num_queries = 100
+        self.hidden_dim = 256
+        self.num_attention_heads = 8
+        self.dim_feedforward = 256 #TODO: check
+        self.mask_feature_size= 256
+        self.dropout =  0.0
+
+        l3= cnum//4 #96, 128,128
+        l4= cnum # 48, 256,256
+        l5 = cnum*2 #12, 512,512
+
+        self.fpn = torchvision.ops.FeaturePyramidNetwork(
+            in_channels_list=[l3, l4, l5],  
+            out_channels=self.hidden_dim
+        )
+
+        self.pos_embedder = Mask2FormerSinePositionEmbedding(num_pos_feats=self.hidden_dim // 2, normalize=True)
+        
+        self.input_projection_3 = nn.Conv2d(self.hidden_dim, self.hidden_dim, kernel_size=1)
+        self.input_projection_4 = nn.Conv2d(self.hidden_dim, self.hidden_dim, kernel_size=1)
+        self.input_projection_5 = nn.Conv2d(self.hidden_dim, self.hidden_dim, kernel_size=1)
+
+        self.adapt_pos2d = nn.Sequential( nn.Linear(self.hidden_dim, self.hidden_dim), nn.ReLU(), nn.Linear(self.hidden_dim, self.hidden_dim),)
+        self.queries_features = nn.Embedding(self.num_queries, self.hidden_dim)
+
+        self.attDecoder = attentionDecoder(self.hidden_dim, self.num_attention_heads, self.dropout, self.dim_feedforward)
+
+        self.layernorm = nn.LayerNorm(self.hidden_dim)
+
+        self.mask_predictor = Mask2FormerMaskPredictor(
+            hidden_size=self.hidden_dim,
+            num_heads=self.num_attention_heads,
+            mask_feature_size=self.mask_feature_size,
+        )
+
+        self.convos = DoubleConv(self.num_queries,64) #new
+        self.outc = OutConv(64, num_class)
+    
+    def pos2posemb2d(self,pos, num_pos_feats=128, temperature=10000):
+        scale = 2 * math.pi
+        pos = pos * scale
+        dim_t = torch.arange(num_pos_feats, dtype=torch.float32, device=pos.device)
+        dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats)
+        pos_x = pos[..., 0, None] / dim_t
+        pos_y = pos[..., 1, None] / dim_t
+        pos_x = torch.stack((pos_x[..., 0::2].sin(), pos_x[..., 1::2].cos()), dim=-1).flatten(-2)
+        pos_y = torch.stack((pos_y[..., 0::2].sin(), pos_y[..., 1::2].cos()), dim=-1).flatten(-2)
+        posemb = torch.cat((pos_y, pos_x), dim=-1)
+        return posemb
+
+    def grid_points(self, batch_size, num_position, num_pattern=1):
+        
+        nx=ny=round(math.sqrt(num_position))
+        num_position=nx*ny
+        x = (torch.arange(nx) + 0.5) / nx
+        y = (torch.arange(ny) + 0.5) / ny
+        xy=torch.meshgrid(x,y)
+        reference_points=torch.cat([xy[0].reshape(-1)[...,None],xy[1].reshape(-1)[...,None]],-1).cuda()
+        #reference_points = reference_points.unsqueeze(0).repeat(batch_size, num_pattern, 1)
+        return reference_points
+
+    def forward(self, x_feat, mask = None):
+        
+        batch_size = x_feat['l3'].shape[0]
+        fpn_output = self.fpn(x_feat)
+        
+
+        feat_pos_emb3 = self.pos_embedder(fpn_output['l3'], mask).flatten(2)
+        feat_pos_emb4 = self.pos_embedder(fpn_output['l4'], mask).flatten(2)        
+        feat_pos_emb5 = self.pos_embedder(fpn_output['l5'], mask).flatten(2)
+        
+
+        feat_pos_emb3 = feat_pos_emb3.permute(2, 0, 1) #[256, 3, 256])
+        feat_pos_emb4 = feat_pos_emb4.permute(2, 0, 1) #[256, 3, 256])
+        feat_pos_emb5 = feat_pos_emb5.permute(2, 0, 1) #[256, 3, 256])
+        
+        feat_3 = self.input_projection_3(fpn_output['l3']).flatten(2)
+        feat_3 = feat_3.flatten(2).permute(2, 0, 1) #([4096, 6, 256])
+
+        feat_4 = self.input_projection_4(fpn_output['l4']).flatten(2)
+        feat_4 = feat_4.flatten(2).permute(2, 0, 1) #[1024, 6, 256])
+
+        feat_5 = self.input_projection_5(fpn_output['l5']).flatten(2)
+        feat_5 = feat_5.flatten(2).permute(2, 0, 1) #([256, 6, 2048]
+
+        # Query
+        # Anchor Query embedding
+        reference_points = self.grid_points(batch_size, self.num_queries).unsqueeze(1).repeat(1, batch_size, 1) #([256, 4, 2])
+        query_emb = self.adapt_pos2d(self.pos2posemb2d(reference_points)) #([256, 4, 256])            
+        query_feat = self.queries_features.weight.unsqueeze(1).repeat(1, batch_size, 1) #([256, 4, 256]) 
+
+        atD5 = self.attDecoder(query_feat, query_emb, feat_5, feat_pos_emb5, mask)
+        atD4 = self.attDecoder(atD5[0], query_emb, feat_4, feat_pos_emb4, mask)
+        atD3 = self.attDecoder(atD4[0], query_emb, feat_3, feat_pos_emb3, mask)
+
+        intermediate_hidden_states = self.layernorm(atD3[0]) #([100, 1, 256])
+        
+        predicted_mask, attention_mask = self.mask_predictor( #There is a predicted mask for each image in the batch and for each query...
+                    intermediate_hidden_states,
+                    fpn_output['l3'],
+                    (64,64), 
+                )
+        
+        
+        #out = self.convos(predicted_mask)  #new. 3,256,128,128 -> 3,1,128,128
+        #out = self.outc(out) #new
+        
+
+        
+        return predicted_mask 

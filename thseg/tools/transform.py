@@ -50,9 +50,13 @@ class Normalize(object):
 
     def __call__(self, sample):
         
-        sample['image'] = sample['image']/255.0
-        sample['image'] = sample['image']-self.mean
-        sample['image'] = sample['image']/self.std
+        elems = list(sample.keys())
+
+        for elem in elems:            
+            if 'image' in elem:        
+                sample[elem] = sample[elem]/255.0
+                sample[elem] = sample[elem]-self.mean
+                sample[elem] = sample[elem]/self.std
 
         return sample
 
@@ -69,9 +73,13 @@ class Normalize_pretrained(object):
         self.std = std
 
     def __call__(self, sample):
-        sample['image'] /= 255.0
-        sample['image'] -= self.mean
-        sample['image'] /= self.std
+        elems = list(sample.keys())
+
+        for elem in elems:            
+            if 'image' in elem: 
+                sample[elem] /= 255.0
+                sample[elem] -= self.mean
+                sample[elem] /= self.std
 
         sample['gt'] /= 255.0
         sample['gt'] -= self.mean
@@ -193,6 +201,7 @@ class ScaleNRotate(object):
             else:
                 flagval = cv2.INTER_CUBIC
 
+            
             tmp = cv2.warpAffine(tmp, M, (w, h), flags=flagval)
 
             sample[elem] = tmp
@@ -252,7 +261,12 @@ class RandomVerticalFlip(object):
 
 class GaussianBlur2(object):
     def __call__(self, sample):
-        sample['image'] = cv2.GaussianBlur(sample['image'], (5, 5), 0)
+        
+        elems = list(sample.keys())
+
+        for elem in elems:            
+            if 'image' in elem: 
+                sample[elem] = cv2.GaussianBlur(sample[elem], (5, 5), 0)
         return sample
 
     def __str__(self):
@@ -261,11 +275,16 @@ class GaussianBlur2(object):
 
 class morphologyEx(object):
     def __call__(self, sample):
-        kernel = np.ones((5, 5), np.uint8)
-        img = sample['image']
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blackhat = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, kernel)
-        sample['image'] = blackhat
+        elems = list(sample.keys())
+
+        for elem in elems:            
+            if 'image' in elem: 
+
+                kernel = np.ones((5, 5), np.uint8)
+                img = sample[elem]
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                blackhat = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, kernel)
+                sample[elem] = blackhat
         return sample
 
     def __str__(self):

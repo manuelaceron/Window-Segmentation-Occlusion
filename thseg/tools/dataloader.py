@@ -94,7 +94,7 @@ class AmodalSegmentation(Dataset):
         
         
         
-        _img, _target, img_path, gt_path, _occ, occ_path, _hidden, hidden_path, _visible, visible_path = self._make_img_gt_point_pair(index) 
+        _img, _target, img_path, gt_path, _occ, clean_image, occ_path, _hidden, hidden_path, _visible, visible_path = self._make_img_gt_point_pair(index) 
         
         
         #annotation: image_id (image), id (object id)
@@ -110,6 +110,7 @@ class AmodalSegmentation(Dataset):
         
         #ann_info.update(resize_annotation(ann_info, (ann_info['images'][0]['height'],ann_info['images'][0]['width']), (_img.shape[0], _img.shape[1]) ) )
         grid = draw_boundaries(ann_info)
+        ins_gt = generate_instance_masks(ann_info)
 
         #cv2.imshow('Grid Overlay', ((_visible+grid)*255).astype(float))
     
@@ -121,12 +122,11 @@ class AmodalSegmentation(Dataset):
         
         pixel_values = encoding["pixel_values"].squeeze() # remove batch dimension
         pro_target = encoding["labels"][0]
-        #ins_tg = generate_instance_masks(pro_target)
-        #ins_tg = np.transpose(ins_tg, (1,2,0))
+        
         
         
 
-        sample = {'image': _img, 'gt': _target, 'img_sf': _img, 'occ': _occ, 'occ_sf': _occ, 'visible_mask': _visible, 'hidden_mask': _hidden, 'grid': grid}
+        sample = {'image': _img, 'gt': _target, 'img_sf': _img, 'occ': _occ, 'occ_sf': _occ, 'visible_mask': _visible, 'hidden_mask': _hidden, 'grid': grid, 'ins_gt': ins_gt, 'clean_image': clean_image}
         
         
         if self.transform is not None:
@@ -185,15 +185,13 @@ class AmodalSegmentation(Dataset):
         
         file = self.list_sample[index].strip()
 
-        
-
-        
-        
         img_path = file.split('  ')[0] #RGB image
         gt_path = file.split('  ')[1] #GT WSeg
         occ_path = file.split('  ')[2] #GT occluder
         visible_path = file.split('  ')[3] #GT visible windows
         hidden_path = file.split('  ')[4] #GT hidden windows
+        clean_img_path = file.split('  ')[5] #GT clean image
+        
         
         
         _img = utils.read_image(os.path.join(img_path))
@@ -201,6 +199,7 @@ class AmodalSegmentation(Dataset):
         _occ = utils.read_image(os.path.join(occ_path), 'gt').astype(np.int32)
         _hidden = utils.read_image(os.path.join(hidden_path), 'am').astype(np.int32)
         _visible = utils.read_image(os.path.join(visible_path), 'am').astype(np.int32)
+        _clean_img = utils.read_image(os.path.join(clean_img_path))
 
 
         #json_name=img_path.split('/')[-1].split('.')[0]+'.json'
@@ -215,7 +214,7 @@ class AmodalSegmentation(Dataset):
         
         
         
-        return _img, _target, img_path, gt_path, _occ, occ_path, _hidden, hidden_path, _visible, visible_path#, ann_json
+        return _img, _target, img_path, gt_path, _occ, _clean_img, occ_path, _hidden, hidden_path, _visible, visible_path#, ann_json
 
 class InferenceSegmentation(Dataset):
     """
@@ -335,11 +334,11 @@ def resize_annotation(annotation, orig_size, target_size):
              
     return annotation           
 
-def generate_instance_masks(ann_data):
+def generate_instance_masks(ann_info):
 
     ann = ann_info['annotations']
     num_boxes= len(ann)
-    image_size = (num_boxes,512,512)
+    image_size = (512,512)
     
     H = ann_info['images'][0]['height']
     W = ann_info['images'][0]['width']
@@ -349,16 +348,18 @@ def generate_instance_masks(ann_data):
     ins_mask = np.zeros((num_boxes,H,W))
 
     for i in range(num_boxes):
-        x, y, width, height = ann[i]
+        x, y, width, height = ann[i]['bbox']
 
         x1, y1 = int(x), int(y)
         x2, y2 = int(x + width), int(y + height)
 
         ins_mask[i, y1:y2, x1:x2] = 1.0
-         
+    
+    
+    ins_mask = np.transpose(ins_mask, (1,2,0))
     re_ins_mask = cv2.resize(ins_mask, image_size, interpolation=cv2.INTER_NEAREST)
 
-    return ins_mask
+    return re_ins_mask
 
 def draw_boundaries(ann_info):
     
@@ -375,10 +376,9 @@ def draw_boundaries(ann_info):
 
     for i in range(num_boxes):
         x, y, width, height = ann[i]['bbox']
-        x=int(x)
-        y = int(y)
-        width = int(width)
-        height = int(height)
+        x, y =int(x), int(y)
+        width, height  = int(width), int(height)
+
         try:
             cv2.line(grid, (x, 0), (x,H), grid_color, 1)
             cv2.line(grid, (x+width, 0), (x+width,H), grid_color, 1)

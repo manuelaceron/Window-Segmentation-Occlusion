@@ -29,6 +29,7 @@ from torchvision.utils import make_grid
 import matplotlib.pyplot as plt
 from networks.MAT.networks.mat import Generator
 from networks.DeepFillV2.networks import Generator as DFV2_Generator
+from train import draw_grd
 
 def pos_process_boxes(add_out):
 
@@ -285,19 +286,21 @@ def collate_fn(batch):
     n_batch["visible_mask"] = inputs[5]
     n_batch["hidden_mask"] = inputs[6]
     n_batch["grid"] = inputs[7]
+    n_batch["ins_gt"] = inputs[8]
+    n_batch["clean_image"] = inputs[9]
 
-    n_batch["img_path"] = inputs[8]
-    n_batch["gt_path"] = inputs[9]
-    n_batch["occ_path"] = inputs[10]
-    n_batch["visible_path"] = inputs[11]
-    n_batch["hidden_path"] = inputs[12]
+    n_batch["img_path"] = inputs[10]
+    n_batch["gt_path"] = inputs[11]
+    n_batch["occ_path"] = inputs[12]
+    n_batch["visible_path"] = inputs[13]
+    n_batch["hidden_path"] = inputs[14]
     
-    n_batch["pixel_values"] = inputs[13]
-    n_batch["pro_target"] = inputs[14]
+    n_batch["pixel_values"] = inputs[15]
+    n_batch["pro_target"] = inputs[16]
     
     if param_dict['use-fixed-model']: 
-        n_batch['df_fimage'] = inputs[15]
-        n_batch['df_fooc'] = inputs[16]
+        n_batch['df_fimage'] = inputs[17]
+        n_batch['df_fooc'] = inputs[18]
 
     
 
@@ -344,7 +347,10 @@ def test(testloader, model, epoch):
         occ_model.cuda()
     
     if param_dict['use-fixed-visi-model']:
-        checkpoint_path = '/home/cero_ma/MCV/code220419_windows/0401_files/Res_UNet_50_ecp_visible/pth_Res_UNet_50/220valiou_best.pth'  # load checkpoint
+        # Visible model 
+        #checkpoint_path = '/home/cero_ma/MCV/code220419_windows/0401_files/Res_UNet_50_ecp_visible/pth_Res_UNet_50/220valiou_best.pth'  
+        # Coarse model 
+        checkpoint_path = '/home/cero_ma/MCV/code220419_windows/0401_files/Res_UNet_50_ecp/pth_Res_UNet_50/80valiou_best.pth'
         state_dict = torch.load(checkpoint_path)['net']
 
         visi_model = get_net('Res_UNet_50', 3, 1, 512, None)
@@ -361,7 +367,7 @@ def test(testloader, model, epoch):
 
     if param_dict['adversarial']:
 
-        checkpoint_path = os.path.join(param_dict['model_dir'], '380valiou_best.pth')  # load checkpoint
+        checkpoint_path = os.path.join(param_dict['model_dir'], '340valiou_best.pth')  # load checkpoint
         state_dict = torch.load(checkpoint_path)['net']
 
         im_channel = 1
@@ -375,7 +381,7 @@ def test(testloader, model, epoch):
             im_channel_mid = 1
             im_channel_out = 1
             #G = DFV2_Generator(cnum_in=im_channel+2, cnum_out=im_channel, cnum=48, return_flow=False)
-            G = DFV2_Generator(cnum_in=im_channel+2, cnum_mid = im_channel_mid, cnum_out=im_channel_out, cnum=48, return_flow=False)
+            G = DFV2_Generator(cnum_in=im_channel+3, cnum_mid = im_channel_mid, cnum_out=im_channel_out, cnum=48, return_flow=False)
         
         model = torch.nn.DataParallel(G, device_ids=[0])
         model.load_state_dict(state_dict)
@@ -598,16 +604,42 @@ def test(testloader, model, epoch):
 
                     #visible = images
                     image_masked = visible * (1.-mask)  # mask image
-
                     ones_x = torch.ones_like(image_masked)[:, 0:1, :, :]
-                    x = torch.cat([image_masked, ones_x, ones_x*mask],dim=1)  # concatenate channels
 
-                    _, x_stage2 = model(x, mask)
+                    use_grid = True
+                    if use_grid:
+                        #grid = torch.stack(data["grid"], dim=0)
+                        if 'monge_119bis.jpg' in img_path[0]:
+                            grid = draw_grd(visible, occ)/255
+                        else:
+                            continue
+                        grid = torch.tensor(grid).cuda()                        
+                        x = torch.cat([image_masked, ones_x, ones_x*mask, grid.float()*mask],dim=1)
+                        
+                        """ if mask.max() ==1:
+                            cv2.imshow('coarse', (np.asarray((visible)[0][0].detach().cpu())*255).astype(float))
+                            cv2.imshow('grid', (np.asarray((grid.float()*mask)[0][0].detach().cpu())*255).astype(float))
+        
+                            cv2.waitKey(0)
+                            cv2.destroyAllWindows()    
+                            pdb.set_trace() """
+                    else:                         
+                        x = torch.cat([image_masked, ones_x, ones_x*mask],dim=1)  
 
-                    # Input visible
-                    outputs = visible * (1.-mask) + x_stage2 * mask
-                    # Input: RGB
-                    #outputs = x_stage2
+                    
+                    if True:#'monge_99.jpg' in img_path[0]:
+                        
+                    
+                        stg1, x_stage2 = model(x, mask)
+                        #out_stg1 = visible * (1.-mask) + stg1 * mask
+                        
+                        # Input visible
+                        outputs = visible * (1.-mask) + x_stage2 * mask
+                        #outputs = x_stage2
+                        
+                        
+                    else:
+                        continue
 
                 else: #mask2Former
                     outputs, add_out = model(images, occ.float())

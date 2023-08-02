@@ -4,7 +4,8 @@ import torch, timm
 import torch.nn as nn
 import torch.nn.functional as F
 from networks.common_func.get_backbone import get_model
-import pdb
+import pdb, cv2
+import numpy as np
 
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
@@ -110,6 +111,7 @@ class Res_UNet_50(nn.Module):
         out = F.interpolate(x, size=(size[2], size[3]), mode='bilinear')
         out = self.outc(out)
         #out = self.activate(out)
+        
         return out
 
 class Res_UNet_34(nn.Module):

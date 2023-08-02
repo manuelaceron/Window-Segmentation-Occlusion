@@ -285,7 +285,7 @@ class AlkModule(nn.Module):
 
         # Vertical -> horizontal convolution
         self.leftStripConv = nn.Sequential(
-            nn.Conv2d(in_c, out_c, kernel_size = (1, k),  dilation =r, padding='same'),
+            nn.Conv2d(in_c, out_c, kernel_size = [1, k],  dilation =r, padding='same'),
             nn.Conv2d(out_c, out_c, kernel_size = [k, 1],  dilation =r, padding='same')
         )
 

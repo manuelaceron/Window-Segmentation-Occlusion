@@ -1560,6 +1560,7 @@ class Mask2FormerPredictionBlock(nn.Module):
 
     def forward(self, input: Tensor) -> Tensor:
         hidden_state = input
+        
         for layer in self.layers:
             hidden_state = layer(hidden_state)
         return hidden_state
@@ -1626,7 +1627,7 @@ class Mask2FormerMaskPredictor(nn.Module):
         self.mask_embedder = Mask2FormerMLPPredictionHead(self.hidden_size, self.hidden_size, mask_feature_size)
 
     def forward(self, outputs: torch.Tensor, pixel_embeddings: torch.Tensor, attention_mask_target_size: int = None):
-
+        
         mask_embeddings = self.mask_embedder(outputs.transpose(0, 1))
         
         # Sum up over the channels
@@ -1951,9 +1952,9 @@ class winMask2Former_newVersion(nn.Module):
     def __init__(self, in_c=3, num_class=4, pretrained_path=True): 
         super(winMask2Former_newVersion, self).__init__()
         
-        self.mode = 'learned' #'centers-learned' # # #'learned' # 'anchor-fixed'
-        self.noAtt = False
-        self.singleLayer = False
+        self.mode = 'anchor-fixed' #'centers-learned' # # #'learned' # 'anchor-fixed'
+        self.noAtt = False #just encoder decoder
+        self.singleLayer = True
         
 
         
@@ -1980,7 +1981,7 @@ class winMask2Former_newVersion(nn.Module):
             out_channels=self.hidden_dim
         )
 
-        if self.mode in {'fixed-anchor', 'centers-learned'}:
+        if self.mode in {'anchor-fixed', 'centers-learned'}:
             # adapt_pos2s used for anchor Q
             self.adapt_pos2d = nn.Sequential( nn.Linear(self.hidden_dim, self.hidden_dim), nn.ReLU(), nn.Linear(self.hidden_dim, self.hidden_dim),)
 
